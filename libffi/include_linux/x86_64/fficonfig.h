@@ -40,21 +40,18 @@
    */
 #define HAVE_ALLOCA_H 1
 
-/* Define if your assembler supports .ascii. */
-#define HAVE_AS_ASCII_PSEUDO_OP 1
-
 /* Define if your assembler supports .cfi_* directives. */
 #define HAVE_AS_CFI_PSEUDO_OP 1
 
 /* Define if your assembler supports .register. */
 /* #undef HAVE_AS_REGISTER_PSEUDO_OP */
 
+/* Define if the compiler uses zarch features. */
+/* #undef HAVE_AS_S390_ZARCH */
+
 /* Define if your assembler and linker support unaligned PC relative relocs.
    */
 /* #undef HAVE_AS_SPARC_UA_PCREL */
-
-/* Define if your assembler supports .string. */
-#define HAVE_AS_STRING_PSEUDO_OP 1
 
 /* Define if your assembler supports unwind section type. */
 #define HAVE_AS_X86_64_UNWIND_SECTION_TYPE 1
@@ -129,9 +126,6 @@
    */
 #define LT_OBJDIR ".libs/"
 
-/* Define to 1 if your C compiler doesn't accept -c and -o together. */
-/* #undef NO_MINUS_C_MINUS_O */
-
 /* Name of package */
 #define PACKAGE "libffi"
 
@@ -142,7 +136,7 @@
 #define PACKAGE_NAME "libffi"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "libffi 3.2.1"
+#define PACKAGE_STRING "libffi 3.99999"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "libffi"
@@ -151,7 +145,7 @@
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "3.2.1"
+#define PACKAGE_VERSION "3.99999"
 
 /* The size of `double', as computed by sizeof. */
 #define SIZEOF_DOUBLE 8
@@ -181,7 +175,7 @@
 /* #undef USING_PURIFY */
 
 /* Version number of package */
-#define VERSION "3.2.1"
+#define VERSION "3.99999"
 
 /* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
    significant byte first (like Motorola and SPARC, unlike Intel). */

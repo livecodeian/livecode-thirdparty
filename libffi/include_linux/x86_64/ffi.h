@@ -1,5 +1,5 @@
 /* -----------------------------------------------------------------*-C-*-
-   libffi 3.2.1 - Copyright (c) 2011, 2014 Anthony Green
+   libffi 3.99999 - Copyright (c) 2011, 2014 Anthony Green
                     - Copyright (c) 1996-2003, 2007, 2008 Red Hat, Inc.
 
    Permission is hereby granted, free of charge, to any person
@@ -217,8 +217,6 @@ typedef enum {
   FFI_BAD_ABI
 } ffi_status;
 
-typedef unsigned FFI_TYPE;
-
 typedef struct {
   ffi_abi abi;
   unsigned nargs;
@@ -230,11 +228,6 @@ typedef struct {
   FFI_EXTRA_CIF_FIELDS;
 #endif
 } ffi_cif;
-
-#if 0
-/* Used to adjust size/alignment of ffi types.  */
-void ffi_prep_types (ffi_abi abi);
-#endif
 
 /* Used internally, but overridden by some architectures */
 ffi_status ffi_prep_cif_core(ffi_cif *cif,
@@ -337,7 +330,8 @@ ffi_status
 ffi_prep_closure (ffi_closure*,
 		  ffi_cif *,
 		  void (*fun)(ffi_cif*,void*,void**,void*),
-		  void *user_data);
+		  void *user_data)
+  __attribute__((deprecated ("use ffi_prep_closure_loc instead")));
 
 ffi_status
 ffi_prep_closure_loc (ffi_closure*,
@@ -427,6 +421,22 @@ ffi_prep_java_raw_closure_loc (ffi_java_raw_closure*,
 			       void *codeloc);
 
 #endif /* FFI_CLOSURES */
+
+#if FFI_GO_CLOSURES
+
+typedef struct {
+  void      *tramp;
+  ffi_cif   *cif;
+  void     (*fun)(ffi_cif*,void*,void**,void*);
+} ffi_go_closure;
+
+ffi_status ffi_prep_go_closure (ffi_go_closure*, ffi_cif *,
+				void (*fun)(ffi_cif*,void*,void**,void*));
+
+void ffi_call_go (ffi_cif *cif, void (*fn)(void), void *rvalue,
+		  void **avalue, void *closure);
+
+#endif /* FFI_GO_CLOSURES */
 
 /* ---- Public interface definition -------------------------------------- */
 
