@@ -47,15 +47,10 @@ public:
         return nullptr;
     }
 
-    bool onGammaCloseToSRGB() const override {
-        // There is no single gamma curve in an A2B0 profile
-        return false;
-    }
-
-    bool onGammaIsLinear() const override {
-        // There is no single gamma curve in an A2B0 profile
-        return false;
-    }
+    // There is no single gamma curve in an A2B0 profile
+    bool onGammaCloseToSRGB() const override { return false; }
+    bool onGammaIsLinear() const override { return false; }
+    bool onIsNumericalTransferFn(SkColorSpaceTransferFn* coeffs) const override { return false; }
 
     sk_sp<SkColorSpace> makeLinearGamma() override {
         // TODO: Analyze the extrema of our projection into XYZ and use suitable primaries?
@@ -77,8 +72,9 @@ public:
             , fGammaNamed(gammaNamed)
             , fMatrix(SkMatrix44::kUninitialized_Constructor)
             , fInputChannels(channelCount)
-            , fOutputChannels(channelCount)
-        {}
+            , fOutputChannels(channelCount) {
+            SkASSERT(gammaNamed != kNonStandard_SkGammaNamed);
+        }
 
         explicit Element(sk_sp<SkGammas> gammas)
             : fType(Type::kGammas)
@@ -163,13 +159,13 @@ public:
 
     PCS pcs() const { return fPCS; }
 
-    InputColorFormat inputColorFormat() const { return fInputColorFormat; }
+    ICCTypeFlag iccType() const { return fICCType; }
 
-private:
-    SkColorSpace_A2B(InputColorFormat inputColorFormat, std::vector<Element> elements, PCS pcs,
+    SkColorSpace_A2B(ICCTypeFlag iccType, std::vector<Element> elements, PCS pcs,
                      sk_sp<SkData> profileData);
 
-    InputColorFormat     fInputColorFormat;
+private:
+    ICCTypeFlag          fICCType;
     std::vector<Element> fElements;
     PCS                  fPCS;
 

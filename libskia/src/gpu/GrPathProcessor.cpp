@@ -20,9 +20,7 @@ public:
     static void GenKey(const GrPathProcessor& pathProc,
                        const GrShaderCaps&,
                        GrProcessorKeyBuilder* b) {
-        b->add32(SkToInt(pathProc.overrides().readsColor()) |
-                 (SkToInt(pathProc.overrides().readsCoverage()) << 1) |
-                 (SkToInt(pathProc.viewMatrix().hasPerspective()) << 2));
+        b->add32(SkToInt(pathProc.viewMatrix().hasPerspective()));
     }
 
     void emitCode(EmitArgs& args) override {
@@ -37,20 +35,16 @@ public:
         this->emitTransforms(args.fVaryingHandler, args.fFPCoordTransformHandler);
 
         // Setup uniform color
-        if (pathProc.overrides().readsColor()) {
-            const char* stagedLocalVarName;
-            fColorUniform = args.fUniformHandler->addUniform(kFragment_GrShaderFlag,
-                                                             kVec4f_GrSLType,
-                                                             kDefault_GrSLPrecision,
-                                                             "Color",
-                                                             &stagedLocalVarName);
-            fragBuilder->codeAppendf("%s = %s;", args.fOutputColor, stagedLocalVarName);
-        }
+        const char* stagedLocalVarName;
+        fColorUniform = args.fUniformHandler->addUniform(kFragment_GrShaderFlag,
+                                                         kVec4f_GrSLType,
+                                                         kDefault_GrSLPrecision,
+                                                         "Color",
+                                                         &stagedLocalVarName);
+        fragBuilder->codeAppendf("%s = %s;", args.fOutputColor, stagedLocalVarName);
 
         // setup constant solid coverage
-        if (pathProc.overrides().readsCoverage()) {
-            fragBuilder->codeAppendf("%s = vec4(1);", args.fOutputCoverage);
-        }
+        fragBuilder->codeAppendf("%s = vec4(1);", args.fOutputCoverage);
     }
 
     void emitTransforms(GrGLSLVaryingHandler* varyingHandler,
@@ -79,7 +73,7 @@ public:
                  const GrPrimitiveProcessor& primProc,
                  FPCoordTransformIter&& transformIter) override {
         const GrPathProcessor& pathProc = primProc.cast<GrPathProcessor>();
-        if (pathProc.overrides().readsColor() && pathProc.color() != fColor) {
+        if (pathProc.color() != fColor) {
             float c[4];
             GrColorToRGBAFloat(pathProc.color(), c);
             pd.set4fv(fColorUniform, 1, c);
@@ -120,13 +114,11 @@ private:
 };
 
 GrPathProcessor::GrPathProcessor(GrColor color,
-                                 const GrXPOverridesForBatch& overrides,
                                  const SkMatrix& viewMatrix,
                                  const SkMatrix& localMatrix)
-    : fColor(color)
-    , fViewMatrix(viewMatrix)
-    , fLocalMatrix(localMatrix)
-    , fOverrides(overrides) {
+        : fColor(color)
+        , fViewMatrix(viewMatrix)
+        , fLocalMatrix(localMatrix) {
     this->initClassID<GrPathProcessor>();
 }
 

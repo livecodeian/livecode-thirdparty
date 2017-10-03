@@ -55,6 +55,10 @@ struct SkGammas : SkRefCnt {
                    this->fTable.fSize == that.fTable.fSize;
         }
 
+        inline bool operator!=(const Data& that) const {
+            return !(*this == that);
+        }
+
         SkGammaNamed             fNamed;
         float                    fValue;
         Table                    fTable;
@@ -90,6 +94,11 @@ struct SkGammas : SkRefCnt {
     const float* table(int i) const {
         SkASSERT(isTable(i));
         return this->data(i).fTable.table(this);
+    }
+
+    int tableSize(int i) const {
+        SkASSERT(isTable(i));
+        return this->data(i).fTable.fSize;
     }
 
     const SkColorSpaceTransferFn& params(int i) const {
@@ -148,11 +157,13 @@ public:
      *  Returns nullptr if color gamut cannot be described in terms of XYZ D50.
      */
     virtual const SkMatrix44* fromXYZD50() const = 0;
-    
+
     virtual bool onGammaCloseToSRGB() const = 0;
-    
+
     virtual bool onGammaIsLinear() const = 0;
-    
+
+    virtual bool onIsNumericalTransferFn(SkColorSpaceTransferFn* coeffs) const = 0;
+
     /**
      *  Returns a color space with the same gamut as this one, but with a linear gamma.
      *  For color spaces whose gamut can not be described in terms of XYZ D50, returns
@@ -174,30 +185,19 @@ public:
 
     virtual Type type() const = 0;
 
-    enum class InputColorFormat {
-        kRGB,
-        kCMYK
-    };
+    typedef uint8_t ICCTypeFlag;
+    static constexpr ICCTypeFlag kRGB_ICCTypeFlag  = 1 << 0;
+    static constexpr ICCTypeFlag kCMYK_ICCTypeFlag = 1 << 1;
+    static constexpr ICCTypeFlag kGray_ICCTypeFlag = 1 << 2;
 
-    static sk_sp<SkColorSpace> MakeICC(const void* input, size_t len,
-                                       InputColorFormat inputColorFormat);
+    static sk_sp<SkColorSpace> MakeICC(const void* input, size_t len, ICCTypeFlag type);
+
+    static sk_sp<SkColorSpace> MakeRGB(SkGammaNamed gammaNamed, const SkMatrix44& toXYZD50);
 
 protected:
     SkColorSpace_Base(sk_sp<SkData> profileData);
 
 private:
-
-    /**
-     *  FIXME (msarett):
-     *  Hiding this function until we can determine if we need it.  Known issues include:
-     *  Only writes 3x3 matrices
-     *  Only writes float gammas
-     *  Rejected by some parsers because the "profile description" is empty
-     */
-    sk_sp<SkData> writeToICC() const;
-
-    static sk_sp<SkColorSpace> MakeRGB(SkGammaNamed gammaNamed, const SkMatrix44& toXYZD50);
-
     SkColorSpace_Base(SkGammaNamed gammaNamed, const SkMatrix44& toXYZ);
 
     sk_sp<SkData> fProfileData;

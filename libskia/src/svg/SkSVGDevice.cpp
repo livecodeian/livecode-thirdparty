@@ -22,6 +22,7 @@
 #include "SkTypeface.h"
 #include "SkUtils.h"
 #include "SkXMLWriter.h"
+#include "SkClipOpPriv.h"
 
 namespace {
 
@@ -534,8 +535,7 @@ void SkSVGDevice::AutoElement::addTextAttributes(const SkPaint& paint) {
 
     SkString familyName;
     SkTHashSet<SkString> familySet;
-    sk_sp<const SkTypeface> tface(paint.getTypeface() ?
-        sk_ref_sp(paint.getTypeface()) : SkTypeface::MakeDefault());
+    sk_sp<SkTypeface> tface(paint.getTypeface() ? paint.refTypeface() : SkTypeface::MakeDefault());
 
     SkASSERT(tface);
     SkTypeface::Style style = tface->style();
@@ -731,7 +731,7 @@ void SkSVGDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bm, const S
     SkClipStack adjustedClipStack;
     if (srcOrNull && *srcOrNull != SkRect::Make(bm.bounds())) {
         adjustedClipStack = *draw.fClipStack;
-        adjustedClipStack.clipRect(dst, *draw.fMatrix, SkCanvas::kIntersect_Op,
+        adjustedClipStack.clipRect(dst, *draw.fMatrix, kIntersect_SkClipOp,
                                    paint.isAntiAlias());
         adjustedDraw.fClipStack = &adjustedClipStack;
     }

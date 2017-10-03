@@ -11,10 +11,40 @@
 #include "GrTypes.h"
 #include "SkRefCnt.h"
 
- /**
-  * Types of shader-language-specific boxed variables we can create. (Currently only GrGLShaderVars,
-  * but should be applicable to other shader languages.)
-  */
+/** This enum indicates the type of antialiasing to be performed. */
+enum class GrAAType {
+    /** No antialiasing */
+    kNone,
+    /** Use fragment shader code to compute a fractional pixel coverage. */
+    kCoverage,
+    /** Use normal MSAA. */
+    kMSAA,
+    /**
+     * Use "mixed samples" MSAA such that the stencil buffer is multisampled but the color buffer is
+     * not.
+     */
+    kMixedSamples
+};
+
+static inline bool GrAATypeIsHW(GrAAType type) {
+    switch (type) {
+        case GrAAType::kNone:
+            return false;
+        case GrAAType::kCoverage:
+            return false;
+        case GrAAType::kMSAA:
+            return true;
+        case GrAAType::kMixedSamples:
+            return true;
+    }
+    SkFAIL("Unknown AA Type");
+    return false;
+}
+
+/**
+ * Types of shader-language-specific boxed variables we can create. (Currently only GrGLShaderVars,
+ * but should be applicable to other shader languages.)
+ */
 enum GrSLType {
     kVoid_GrSLType,
     kBool_GrSLType,

@@ -27,12 +27,12 @@ static boolean sk_fill_input_buffer(j_decompress_ptr dinfo) {
 
     // libjpeg is still happy with a less than full read, as long as the result is non-zero
     if (bytes == 0) {
-        return FALSE;
+        return false;
     }
 
     src->next_input_byte = (const JOCTET*) src->fBuffer;
     src->bytes_in_buffer = bytes;
-    return TRUE;
+    return true;
 }
 
 /*

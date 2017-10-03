@@ -9,9 +9,9 @@
 #define GrGpuCommandBuffer_DEFINED
 
 #include "GrColor.h"
-#include "batches/GrDrawOp.h"
+#include "ops/GrDrawOp.h"
 
-class GrBatchFlushState;
+class GrOpFlushState;
 class GrFixedClip;
 class GrGpu;
 class GrMesh;
@@ -24,7 +24,7 @@ struct SkRect;
 /**
  * The GrGpuCommandBuffer is a series of commands (draws, clears, and discards), which all target
  * the same render target. It is possible that these commands execute immediately (GL), or get
- * buffered up for later execution (Vulkan). GrBatches will execute their draw commands into a
+ * buffered up for later execution (Vulkan). GrOps will execute their draw commands into a
  * GrGpuCommandBuffer.
  *
  * Ideally we'd know the GrRenderTarget, or at least its properties when the GrGpuCommandBuffer, is
@@ -73,7 +73,7 @@ public:
               const SkRect& bounds);
 
     // Performs an upload of vertex data in the middle of a set of a set of draws
-    virtual void inlineUpload(GrBatchFlushState* state, GrDrawOp::DeferredUploadFn& upload) = 0;
+    virtual void inlineUpload(GrOpFlushState* state, GrDrawOp::DeferredUploadFn& upload) = 0;
 
     /**
      * Clear the passed in render target. Ignores the draw state and clip.

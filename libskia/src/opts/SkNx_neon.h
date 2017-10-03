@@ -10,8 +10,6 @@
 
 #include <arm_neon.h>
 
-#define SKNX_IS_FAST
-
 namespace {
 
 // ARMv8 has vrndmq_f32 to floor 4 floats.  Here we emulate it:
@@ -257,6 +255,8 @@ public:
     AI SkNx operator + (const SkNx& o) const { return vadd_u16(fVec, o.fVec); }
     AI SkNx operator - (const SkNx& o) const { return vsub_u16(fVec, o.fVec); }
     AI SkNx operator * (const SkNx& o) const { return vmul_u16(fVec, o.fVec); }
+    AI SkNx operator & (const SkNx& o) const { return vand_u16(fVec, o.fVec); }
+    AI SkNx operator | (const SkNx& o) const { return vorr_u16(fVec, o.fVec); }
 
     AI SkNx operator << (int bits) const { return fVec << SkNx(bits).fVec; }
     AI SkNx operator >> (int bits) const { return fVec >> SkNx(bits).fVec; }
@@ -295,6 +295,8 @@ public:
     AI SkNx operator + (const SkNx& o) const { return vaddq_u16(fVec, o.fVec); }
     AI SkNx operator - (const SkNx& o) const { return vsubq_u16(fVec, o.fVec); }
     AI SkNx operator * (const SkNx& o) const { return vmulq_u16(fVec, o.fVec); }
+    AI SkNx operator & (const SkNx& o) const { return vandq_u16(fVec, o.fVec); }
+    AI SkNx operator | (const SkNx& o) const { return vorrq_u16(fVec, o.fVec); }
 
     AI SkNx operator << (int bits) const { return fVec << SkNx(bits).fVec; }
     AI SkNx operator >> (int bits) const { return fVec >> SkNx(bits).fVec; }

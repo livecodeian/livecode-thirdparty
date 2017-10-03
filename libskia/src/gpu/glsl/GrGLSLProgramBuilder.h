@@ -72,7 +72,7 @@ public:
 
     // Used to add a uniform for the RenderTarget height (used for frag position) without mangling
     // the name of the uniform inside of a stage.
-    void addRTHeightUniform(const char* name, const char** outName);
+    void addRTHeightUniform(const char* name);
 
     // Generates a name for a variable. The generated string will be name prefixed by the prefix
     // char (unless the prefix is '\0'). It also will mangle the name to be stage-specific unless
@@ -159,7 +159,6 @@ private:
     void emitAndInstallXferProc(const GrXferProcessor&,
                                 const GrGLSLExpr4& colorIn,
                                 const GrGLSLExpr4& coverageIn,
-                                bool ignoresCoverage,
                                 GrPixelLocalStorageState plsState);
     void emitSamplersAndImageStorages(const GrProcessor& processor,
                                       SkTArray<SamplerHandle>* outTexSamplerHandles,

@@ -40,11 +40,7 @@ protected:
 
 class SkMutex : public SkBaseMutex {
 public:
-    // [[ Patch ]] Work around a missing C++11 feature in older GCC versions
-    //using SkBaseMutex::SkBaseMutex;
-    constexpr SkMutex()
-        : SkBaseMutex() {}
-    
+    using SkBaseMutex::SkBaseMutex;
     ~SkMutex() { fSemaphore.cleanup(); }
 };
 
@@ -55,7 +51,7 @@ public:
         if (mutex) {
             mutex->acquire();
         }
-        fRelease = [](void* the_mutex) { ((T*)the_mutex)->release(); };
+        fRelease = [](void* mutex) { ((T*)mutex)->release(); };
     }
 
     template <typename T>
@@ -84,7 +80,7 @@ public:
     SkAutoExclusive(T& mutex) : fMutex(&mutex) {
         mutex.acquire();
 
-        fRelease = [](void* the_mutex) { ((T*)the_mutex)->release(); };
+        fRelease = [](void* mutex) { ((T*)mutex)->release(); };
     }
     ~SkAutoExclusive() { fRelease(fMutex); }
 

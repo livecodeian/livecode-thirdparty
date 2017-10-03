@@ -56,9 +56,13 @@ public:
     /**
      *  @param requestedColorType Color type requested by the client
      *
-     *  If it is possible to decode to requestedColorType, this returns
-     *  requestedColorType.  Otherwise, this returns whichever color type
-     *  is suggested by the codec as the best match for the encoded data.
+     *  |requestedColorType| may be overriden.  We will default to kF16
+     *  for high precision images and kIndex8 for GIF and WBMP.
+     *
+     *  In the general case, if it is possible to decode to
+     *  |requestedColorType|, this returns |requestedColorType|.
+     *  Otherwise, this returns a color type that is an appropriate
+     *  match for the the encoded data.
      */
     SkColorType computeOutputColorType(SkColorType requestedColorType);
 
@@ -70,6 +74,16 @@ public:
      *  has alpha, the value of requestedUnpremul will be honored.
      */
     SkAlphaType computeOutputAlphaType(bool requestedUnpremul);
+
+    /**
+     *  @param outputColorType Color type that the client will decode to
+     *
+     *  Returns the appropriate color space to decode to.
+     *
+     *  For now, this just returns a default.  This could be updated to take
+     *  requests for wide gamut modes or specific output spaces.
+     */
+    sk_sp<SkColorSpace> computeOutputColorSpace(SkColorType outputColorType);
 
     /**
      *  Returns the dimensions of the scaled output image, for an input

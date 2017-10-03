@@ -6,30 +6,33 @@
  */
 
 #include "GrGLGpu.h"
+
+#include "../private/GrGLSL.h"
+#include "GrFixedClip.h"
 #include "GrGLBuffer.h"
 #include "GrGLGpuCommandBuffer.h"
 #include "GrGLStencilAttachment.h"
 #include "GrGLTextureRenderTarget.h"
-#include "GrFixedClip.h"
 #include "GrGpuResourcePriv.h"
 #include "GrMesh.h"
-#include "GrPipeline.h"
 #include "GrPLSGeometryProcessor.h"
+#include "GrPipeline.h"
 #include "GrRenderTargetPriv.h"
 #include "GrShaderCaps.h"
 #include "GrSurfacePriv.h"
 #include "GrTexturePriv.h"
 #include "GrTypes.h"
-#include "builders/GrGLShaderStringBuilder.h"
-#include "glsl/GrGLSLPLSPathRendering.h"
-#include "instanced/GLInstancedRendering.h"
+#include "SkAutoMalloc.h"
 #include "SkMakeUnique.h"
 #include "SkMipMap.h"
 #include "SkPixmap.h"
+#include "SkSLCompiler.h"
 #include "SkStrokeRec.h"
 #include "SkTemplates.h"
 #include "SkTypes.h"
-#include "../private/GrGLSL.h"
+#include "builders/GrGLShaderStringBuilder.h"
+#include "glsl/GrGLSLPLSPathRendering.h"
+#include "instanced/GLInstancedRendering.h"
 
 #define GL_CALL(X) GR_GL_CALL(this->glInterface(), X)
 #define GL_CALL_RET(RET, X) GR_GL_CALL_RET(this->glInterface(), RET, X)
@@ -399,13 +402,20 @@ bool GrGLGpu::createPLSSetupProgram() {
 
     str = vshaderTxt.c_str();
     length = SkToInt(vshaderTxt.size());
+    SkSL::Program::Settings settings;
+    settings.fCaps = shaderCaps;
+    SkSL::Program::Inputs inputs;
     GrGLuint vshader = GrGLCompileAndAttachShader(*fGLContext, fPLSSetupProgram.fProgram,
-                                                  GR_GL_VERTEX_SHADER, &str, &length, 1, &fStats);
+                                                  GR_GL_VERTEX_SHADER, &str, &length, 1, &fStats,
+                                                  settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     str = fshaderTxt.c_str();
     length = SkToInt(fshaderTxt.size());
     GrGLuint fshader = GrGLCompileAndAttachShader(*fGLContext, fPLSSetupProgram.fProgram,
-                                                  GR_GL_FRAGMENT_SHADER, &str, &length, 1, &fStats);
+                                                  GR_GL_FRAGMENT_SHADER, &str, &length, 1, &fStats,
+                                                  settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     GL_CALL(LinkProgram(fPLSSetupProgram.fProgram));
 
@@ -768,7 +778,7 @@ bool GrGLGpu::onGetWritePixelsInfo(GrSurface* dstSurface, int width, int height,
                                    GrPixelConfig srcConfig,
                                    DrawPreference* drawPreference,
                                    WritePixelTempDrawInfo* tempDrawInfo) {
-    if (kIndex_8_GrPixelConfig == srcConfig || GrPixelConfigIsCompressed(dstSurface->config())) {
+    if (GrPixelConfigIsCompressed(dstSurface->config())) {
         return false;
     }
 
@@ -919,6 +929,7 @@ static inline GrGLint config_alignment(GrPixelConfig config) {
     SkASSERT(!GrPixelConfigIsCompressed(config));
     switch (config) {
         case kAlpha_8_GrPixelConfig:
+        case kGray_8_GrPixelConfig:
             return 1;
         case kRGB_565_GrPixelConfig:
         case kRGBA_4444_GrPixelConfig:
@@ -1409,10 +1420,6 @@ bool GrGLGpu::uploadCompressedTexData(const GrSurfaceDesc& desc,
         return allocate_and_populate_compressed_texture(desc, *interface, caps, target,
                                                         internalFormat, texels, width, height);
     } else {
-        // Paletted textures can't be updated.
-        if (GR_GL_PALETTE8_RGBA8 == internalFormat) {
-            return false;
-        }
         for (int currentMipLevel = 0; currentMipLevel < texels.count(); currentMipLevel++) {
             SkASSERT(texels[currentMipLevel].fPixels || kTransfer_UploadType == uploadType);
 
@@ -2301,6 +2308,16 @@ static bool read_pixels_pays_for_y_flip(GrSurfaceOrigin origin, const GrGLCaps& 
 }
 
 bool GrGLGpu::readPixelsSupported(GrRenderTarget* target, GrPixelConfig readConfig) {
+#ifdef SK_BUILD_FOR_MAC
+    // Chromium may ask us to read back from locked IOSurfaces. Calling the command buffer's
+    // glGetIntegerv() with GL_IMPLEMENTATION_COLOR_READ_FORMAT/_TYPE causes the command buffer
+    // to make a call to check the framebuffer status which can hang the driver. So in Mac Chromium
+    // we always use a temporary surface to test for read pixels support.
+    // https://www.crbug.com/662802
+    if (this->glContext().driver() == kChromium_GrGLDriver) {
+        return this->readPixelsSupported(target->config(), readConfig);
+    }
+#endif
     auto bindRenderTarget = [this, target]() -> bool {
         this->flushRenderTarget(static_cast<GrGLRenderTarget*>(target), &SkIRect::EmptyIRect());
         return true;
@@ -2792,7 +2809,7 @@ void GrGLGpu::draw(const GrPipeline& pipeline,
                                                 sizeof(uint16_t) * nonInstMesh->startIndex());
                 // info.startVertex() was accounted for by setupGeometry.
                 if (this->glCaps().drawRangeElementsSupport()) {
-                    // We assume here that the batch that generated the mesh used the full
+                    // We assume here that the GrMeshDrawOps that generated the mesh used the full
                     // 0..vertexCount()-1 range.
                     int start = 0;
                     int end = nonInstMesh->vertexCount() - 1;
@@ -3420,8 +3437,16 @@ void GrGLGpu::generateMipmaps(const GrSamplerParams& params, bool allowSRGBInput
     // Configure sRGB decode, if necessary. This state is the only thing needed for the driver
     // call (glGenerateMipmap) to work correctly. Our manual method dirties other state, too.
     if (this->glCaps().srgbDecodeDisableSupport() && GrPixelConfigIsSRGB(texture->config())) {
-        GL_CALL(TexParameteri(target, GR_GL_TEXTURE_SRGB_DECODE_EXT,
-                              allowSRGBInputs ? GR_GL_DECODE_EXT : GR_GL_SKIP_DECODE_EXT));
+        GrGLenum srgbDecode = allowSRGBInputs ? GR_GL_DECODE_EXT : GR_GL_SKIP_DECODE_EXT;
+        // Command buffer's sRGB decode extension doesn't influence mipmap generation correctly.
+        // If we set this to skip_decode, it appears to suppress sRGB -> Linear for each downsample,
+        // but not the Linear -> sRGB when writing the next level. The result is that mip-chains
+        // get progressively brighter as you go down. Forcing this to 'decode' gives predictable
+        // (and only slightly incorrect) results. See crbug.com/655247 (~comment 28)
+        if (!this->glCaps().srgbDecodeDisableAffectsMipmaps()) {
+            srgbDecode = GR_GL_DECODE_EXT;
+        }
+        GL_CALL(TexParameteri(target, GR_GL_TEXTURE_SRGB_DECODE_EXT, srgbDecode));
     }
 
     // Either do manual mipmap generation or (if that fails), just rely on the driver:
@@ -3847,15 +3872,20 @@ bool GrGLGpu::createCopyProgram(GrTexture* srcTex) {
 
     str = vshaderTxt.c_str();
     length = SkToInt(vshaderTxt.size());
+    SkSL::Program::Settings settings;
+    settings.fCaps = shaderCaps;
+    SkSL::Program::Inputs inputs;
     GrGLuint vshader = GrGLCompileAndAttachShader(*fGLContext, fCopyPrograms[progIdx].fProgram,
                                                   GR_GL_VERTEX_SHADER, &str, &length, 1,
-                                                  &fStats);
+                                                  &fStats, settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     str = fshaderTxt.c_str();
     length = SkToInt(fshaderTxt.size());
     GrGLuint fshader = GrGLCompileAndAttachShader(*fGLContext, fCopyPrograms[progIdx].fProgram,
                                                   GR_GL_FRAGMENT_SHADER, &str, &length, 1,
-                                                  &fStats);
+                                                  &fStats, settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     GL_CALL(LinkProgram(fCopyPrograms[progIdx].fProgram));
 
@@ -4000,15 +4030,20 @@ bool GrGLGpu::createMipmapProgram(int progIdx) {
 
     str = vshaderTxt.c_str();
     length = SkToInt(vshaderTxt.size());
+    SkSL::Program::Settings settings;
+    settings.fCaps = shaderCaps;
+    SkSL::Program::Inputs inputs;
     GrGLuint vshader = GrGLCompileAndAttachShader(*fGLContext, fMipmapPrograms[progIdx].fProgram,
                                                   GR_GL_VERTEX_SHADER, &str, &length, 1,
-                                                  &fStats);
+                                                  &fStats, settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     str = fshaderTxt.c_str();
     length = SkToInt(fshaderTxt.size());
     GrGLuint fshader = GrGLCompileAndAttachShader(*fGLContext, fMipmapPrograms[progIdx].fProgram,
                                                   GR_GL_FRAGMENT_SHADER, &str, &length, 1,
-                                                  &fStats);
+                                                  &fStats, settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     GL_CALL(LinkProgram(fMipmapPrograms[progIdx].fProgram));
 
@@ -4089,15 +4124,20 @@ bool GrGLGpu::createWireRectProgram() {
 
     str = vshaderTxt.c_str();
     length = SkToInt(vshaderTxt.size());
+    SkSL::Program::Settings settings;
+    settings.fCaps = this->caps()->shaderCaps();
+    SkSL::Program::Inputs inputs;
     GrGLuint vshader = GrGLCompileAndAttachShader(*fGLContext, fWireRectProgram.fProgram,
                                                   GR_GL_VERTEX_SHADER, &str, &length, 1,
-                                                  &fStats);
+                                                  &fStats, settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     str = fshaderTxt.c_str();
     length = SkToInt(fshaderTxt.size());
     GrGLuint fshader = GrGLCompileAndAttachShader(*fGLContext, fWireRectProgram.fProgram,
                                                   GR_GL_FRAGMENT_SHADER, &str, &length, 1,
-                                                  &fStats);
+                                                  &fStats, settings, &inputs);
+    SkASSERT(inputs.isEmpty());
 
     GL_CALL(LinkProgram(fWireRectProgram.fProgram));
 

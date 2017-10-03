@@ -11,24 +11,24 @@
 #include "SkColorSpace.h"
 #include "SkColorSpaceXform.h"
 #include "SkData.h"
-//#include "SkGifCodec.h"
+#include "SkGifCodec.h"
 #include "SkHalf.h"
-//#include "SkIcoCodec.h"
-//#include "SkJpegCodec.h"
-//#ifdef SK_HAS_PNG_LIBRARY
-//#include "SkPngCodec.h"
-//#endif
-//#include "SkRawCodec.h"
+#include "SkIcoCodec.h"
+#include "SkJpegCodec.h"
+#ifdef SK_HAS_PNG_LIBRARY
+#include "SkPngCodec.h"
+#endif
+#include "SkRawCodec.h"
 #include "SkStream.h"
-//#include "SkWbmpCodec.h"
-//#include "SkWebpCodec.h"
+#include "SkWbmpCodec.h"
+#include "SkWebpCodec.h"
 
 struct DecoderProc {
     bool (*IsFormat)(const void*, size_t);
     SkCodec* (*NewFromStream)(SkStream*);
 };
 
-static const DecoderProc gDecoderProcs[] = {/*
+static const DecoderProc gDecoderProcs[] = {
 #ifdef SK_HAS_JPEG_LIBRARY
     { SkJpegCodec::IsJpeg, SkJpegCodec::NewFromStream },
 #endif
@@ -40,12 +40,11 @@ static const DecoderProc gDecoderProcs[] = {/*
     { SkIcoCodec::IsIco, SkIcoCodec::NewFromStream },
 #endif
     { SkBmpCodec::IsBmp, SkBmpCodec::NewFromStream },
-    { SkWbmpCodec::IsWbmp, SkWbmpCodec::NewFromStream }*/
-	{ nullptr, nullptr }
+    { SkWbmpCodec::IsWbmp, SkWbmpCodec::NewFromStream }
 };
 
 size_t SkCodec::MinBufferedBytesNeeded() {
-	return 256; // WEBP_VP8_HEADER_SIZE;
+    return WEBP_VP8_HEADER_SIZE;
 }
 
 SkCodec* SkCodec::NewFromStream(SkStream* stream,

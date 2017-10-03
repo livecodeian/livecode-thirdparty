@@ -10,12 +10,8 @@
 #include "GrOpList.h"
 #include "GrSurfacePriv.h"
 
-#include "SkBitmap.h"
 #include "SkGrPriv.h"
-#include "SkImageEncoder.h"
 #include "SkMathPriv.h"
-#include "SkStream.h"
-#include <stdio.h>
 
 GrSurface::~GrSurface() {
     if (fLastOpList) {
@@ -142,60 +138,28 @@ bool GrSurfacePriv::AdjustWritePixelParams(int surfaceWidth,
 
 //////////////////////////////////////////////////////////////////////////////
 
-bool GrSurface::writePixels(int left, int top, int width, int height,
-                            GrPixelConfig config, const void* buffer, size_t rowBytes,
-                            uint32_t pixelOpsFlags) {
+bool GrSurface::writePixels(SkColorSpace* dstColorSpace, int left, int top, int width, int height,
+                            GrPixelConfig config, SkColorSpace* srcColorSpace, const void* buffer,
+                            size_t rowBytes, uint32_t pixelOpsFlags) {
     // go through context so that all necessary flushing occurs
     GrContext* context = this->getContext();
     if (nullptr == context) {
         return false;
     }
-    return context->writeSurfacePixels(this, left, top, width, height, config, buffer,
-                                       rowBytes, pixelOpsFlags);
+    return context->writeSurfacePixels(this, dstColorSpace, left, top, width, height, config,
+                                       srcColorSpace, buffer, rowBytes, pixelOpsFlags);
 }
 
-bool GrSurface::readPixels(int left, int top, int width, int height,
-                           GrPixelConfig config, void* buffer, size_t rowBytes,
-                           uint32_t pixelOpsFlags) {
+bool GrSurface::readPixels(SkColorSpace* srcColorSpace, int left, int top, int width, int height,
+                           GrPixelConfig config, SkColorSpace* dstColorSpace, void* buffer,
+                           size_t rowBytes, uint32_t pixelOpsFlags) {
     // go through context so that all necessary flushing occurs
     GrContext* context = this->getContext();
     if (nullptr == context) {
         return false;
     }
-    return context->readSurfacePixels(this, left, top, width, height, config, buffer,
-                                      rowBytes, pixelOpsFlags);
-}
-
-static bool encode_image_to_file(const char* path, const SkBitmap& src) {
-    SkFILEWStream file(path);
-    return file.isValid() && SkEncodeImage(&file, src, SkEncodedImageFormat::kPNG, 100);
-}
-
-// TODO: This should probably be a non-member helper function. It might only be needed in
-// debug or developer builds.
-bool GrSurface::savePixels(const char* filename) {
-    SkBitmap bm;
-    if (!bm.tryAllocPixels(SkImageInfo::MakeN32Premul(this->width(), this->height()))) {
-        return false;
-    }
-
-    bool result = this->readPixels(0, 0, this->width(), this->height(), kSkia8888_GrPixelConfig,
-                                   bm.getPixels());
-    if (!result) {
-        SkDebugf("------ failed to read pixels for %s\n", filename);
-        return false;
-    }
-
-    // remove any previous version of this file
-    remove(filename);
-
-    if (!encode_image_to_file(filename, bm)) {
-        SkDebugf("------ failed to encode %s\n", filename);
-        remove(filename);   // remove any partial file
-        return false;
-    }
-
-    return true;
+    return context->readSurfacePixels(this, srcColorSpace, left, top, width, height, config,
+                                      dstColorSpace, buffer, rowBytes, pixelOpsFlags);
 }
 
 void GrSurface::flushWrites() {

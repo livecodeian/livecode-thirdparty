@@ -50,11 +50,7 @@ private:
 
 class SkSemaphore : public SkBaseSemaphore {
 public:
-    // [[ Patch ]] Work around a missing C++11 feature in older GCC versions
-    //using SkBaseSemaphore::SkBaseSemaphore;
-    constexpr SkSemaphore(int count = 0)
-        : SkBaseSemaphore(count) {}
-    
+    using SkBaseSemaphore::SkBaseSemaphore;
     ~SkSemaphore() { this->cleanup(); }
 };
 

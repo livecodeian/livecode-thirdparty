@@ -50,18 +50,18 @@ class SK_API GrRenderTargetContext : public GrSurfaceContext {
 public:
     ~GrRenderTargetContext() override;
 
-    bool copySurface(GrSurface* src, const SkIRect& srcRect, const SkIPoint& dstPoint) override;
-
-    // TODO: it is odd that we need both the SkPaint in the following 3 methods.
-    // We should extract the text parameters from SkPaint and pass them separately
-    // akin to GrStyle (GrTextInfo?)
-    virtual void drawText(const GrClip&,  const GrPaint&, const SkPaint&,
-                          const SkMatrix& viewMatrix, const char text[], size_t byteLength,
-                          SkScalar x, SkScalar y, const SkIRect& clipBounds);
-    virtual void drawPosText(const GrClip&, const GrPaint&, const SkPaint&,
-                             const SkMatrix& viewMatrix, const char text[], size_t byteLength,
-                             const SkScalar pos[], int scalarsPerPosition,
-                             const SkPoint& offset, const SkIRect& clipBounds);
+    // We use SkPaint rather than GrPaint here for two reasons:
+    //    * The SkPaint carries extra text settings. If these were extracted to a lighter object
+    //      we could use GrPaint except that
+    //    * SkPaint->GrPaint conversion depends upon whether the glyphs are color or grayscale and
+    //      this can vary within a text run.
+    virtual void drawText(const GrClip&, const SkPaint&, const SkMatrix& viewMatrix,
+                          const char text[], size_t byteLength, SkScalar x, SkScalar y,
+                          const SkIRect& clipBounds);
+    virtual void drawPosText(const GrClip&, const SkPaint&, const SkMatrix& viewMatrix,
+                             const char text[], size_t byteLength, const SkScalar pos[],
+                             int scalarsPerPosition, const SkPoint& offset,
+                             const SkIRect& clipBounds);
     virtual void drawTextBlob(const GrClip&, const SkPaint&,
                               const SkMatrix& viewMatrix, const SkTextBlob*,
                               SkScalar x, SkScalar y,
@@ -85,32 +85,36 @@ public:
     /**
      *  Draw everywhere (respecting the clip) with the paint.
      */
-    void drawPaint(const GrClip&, const GrPaint&, const SkMatrix& viewMatrix);
+    void drawPaint(const GrClip&, GrPaint&&, const SkMatrix& viewMatrix);
 
     /**
-     *  Draw the rect using a paint.
-     *  @param paint        describes how to color pixels.
-     *  @param viewMatrix   transformation matrix
-     *  @param style        The style to apply. Null means fill. Currently path effects are not
-     *                      allowed.
-     *  The rects coords are used to access the paint (through texture matrix)
+     * Draw the rect using a paint.
+     * @param paint        describes how to color pixels.
+     * @param GrAA         Controls whether rect is antialiased
+     * @param viewMatrix   transformation matrix
+     * @param style        The style to apply. Null means fill. Currently path effects are not
+     *                     allowed.
+     * The rects coords are used to access the paint (through texture matrix)
      */
     void drawRect(const GrClip&,
-                  const GrPaint& paint,
+                  GrPaint&& paint,
+                  GrAA,
                   const SkMatrix& viewMatrix,
                   const SkRect&,
-                  const GrStyle* style  = nullptr);
+                  const GrStyle* style = nullptr);
 
     /**
      * Maps a rectangle of shader coordinates to a rectangle and fills that rectangle.
      *
-     * @param paint         describes how to color pixels.
-     * @param viewMatrix    transformation matrix which applies to rectToDraw
-     * @param rectToDraw    the rectangle to draw
-     * @param localRect     the rectangle of shader coordinates applied to rectToDraw
+     * @param paint        describes how to color pixels.
+     * @param GrAA         Controls whether rect is antialiased
+     * @param viewMatrix   transformation matrix which applies to rectToDraw
+     * @param rectToDraw   the rectangle to draw
+     * @param localRect    the rectangle of shader coordinates applied to rectToDraw
      */
     void fillRectToRect(const GrClip&,
-                        const GrPaint& paint,
+                        GrPaint&& paint,
+                        GrAA,
                         const SkMatrix& viewMatrix,
                         const SkRect& rectToDraw,
                         const SkRect& localRect);
@@ -119,54 +123,58 @@ public:
      * Fills a rect with a paint and a localMatrix.
      */
     void fillRectWithLocalMatrix(const GrClip& clip,
-                                 const GrPaint& paint,
+                                 GrPaint&& paint,
+                                 GrAA,
                                  const SkMatrix& viewMatrix,
                                  const SkRect& rect,
                                  const SkMatrix& localMatrix);
 
     /**
-     *  Draw a roundrect using a paint.
+     * Draw a roundrect using a paint.
      *
-     *  @param paint        describes how to color pixels.
-     *  @param viewMatrix   transformation matrix
-     *  @param rrect        the roundrect to draw
-     *  @param style        style to apply to the rrect. Currently path effects are not allowed.
+     * @param paint       describes how to color pixels.
+     * @param GrAA        Controls whether rrect is antialiased.
+     * @param viewMatrix  transformation matrix
+     * @param rrect       the roundrect to draw
+     * @param style       style to apply to the rrect. Currently path effects are not allowed.
      */
     void drawRRect(const GrClip&,
-                   const GrPaint&,
+                   GrPaint&&,
+                   GrAA,
                    const SkMatrix& viewMatrix,
                    const SkRRect& rrect,
                    const GrStyle& style);
 
     /**
-     *  Draw a roundrect using a paint and a shadow shader. This is separate from drawRRect
-     *  because it uses different underlying geometry and GeometryProcessor
+     * Draw a roundrect using a paint and a shadow shader. This is separate from drawRRect
+     * because it uses different underlying geometry and GeometryProcessor
      *
-     *  @param paint        describes how to color pixels.
-     *  @param viewMatrix   transformation matrix
-     *  @param rrect        the roundrect to draw
-     *  @param blurRadius   amount of shadow blur to apply (in device space)
-     *  @param style        style to apply to the rrect. Currently path effects are not allowed.
+     * @param paint        describes how to color pixels.
+     * @param viewMatrix   transformation matrix
+     * @param rrect        the roundrect to draw
+     * @param blurRadius   amount of shadow blur to apply (in device space)
+     * @param style        style to apply to the rrect. Currently path effects are not allowed.
      */
     void drawShadowRRect(const GrClip&,
-                         const GrPaint&,
+                         GrPaint&&,
                          const SkMatrix& viewMatrix,
                          const SkRRect& rrect,
                          SkScalar blurRadius,
                          const GrStyle& style);
 
     /**
-     *  Shortcut for drawing an SkPath consisting of nested rrects using a paint.
-     *  Does not support stroking. The result is undefined if outer does not contain
-     *  inner.
+     * Shortcut for filling a SkPath consisting of nested rrects using a paint. The result is
+     * undefined if outer does not contain inner.
      *
-     *  @param paint        describes how to color pixels.
-     *  @param viewMatrix   transformation matrix
-     *  @param outer        the outer roundrect
-     *  @param inner        the inner roundrect
+     * @param paint        describes how to color pixels.
+     * @param GrAA         Controls whether rrects edges are antialiased
+     * @param viewMatrix   transformation matrix
+     * @param outer        the outer roundrect
+     * @param inner        the inner roundrect
      */
     void drawDRRect(const GrClip&,
-                    const GrPaint&,
+                    GrPaint&&,
+                    GrAA,
                     const SkMatrix& viewMatrix,
                     const SkRRect& outer,
                     const SkRRect& inner);
@@ -175,12 +183,14 @@ public:
      * Draws a path.
      *
      * @param paint         describes how to color pixels.
+     * @param GrAA          Controls whether the path is antialiased.
      * @param viewMatrix    transformation matrix
      * @param path          the path to draw
      * @param style         style to apply to the path.
      */
     void drawPath(const GrClip&,
-                  const GrPaint&,
+                  GrPaint&&,
+                  GrAA,
                   const SkMatrix& viewMatrix,
                   const SkPath&,
                   const GrStyle& style);
@@ -203,7 +213,7 @@ public:
      *                          number of indices.
      */
     void drawVertices(const GrClip&,
-                      const GrPaint& paint,
+                      GrPaint&& paint,
                       const SkMatrix& viewMatrix,
                       GrPrimitiveType primitiveType,
                       int vertexCount,
@@ -214,7 +224,8 @@ public:
                       int indexCount);
 
     /**
-     * Draws textured sprites from an atlas with a paint.
+     * Draws textured sprites from an atlas with a paint. This currently does not support AA for the
+     * sprite rectangle edges.
      *
      * @param   paint           describes how to color pixels.
      * @param   viewMatrix      transformation matrix
@@ -225,7 +236,7 @@ public:
      *                          the paint's color field.
      */
     void drawAtlas(const GrClip&,
-                   const GrPaint& paint,
+                   GrPaint&& paint,
                    const SkMatrix& viewMatrix,
                    int spriteCount,
                    const SkRSXform xform[],
@@ -237,11 +248,13 @@ public:
      *
      * @param paint         describes how to color pixels
      * @param viewMatrix    transformation matrix
+     * @param aa            should the rects of the region be antialiased.
      * @param region        the region to be drawn
      * @param style         style to apply to the region
      */
     void drawRegion(const GrClip&,
-                    const GrPaint& paint,
+                    GrPaint&& paint,
+                    GrAA aa,
                     const SkMatrix& viewMatrix,
                     const SkRegion& region,
                     const GrStyle& style);
@@ -250,31 +263,35 @@ public:
      * Draws an oval.
      *
      * @param paint         describes how to color pixels.
+     * @param GrAA          Controls whether the oval is antialiased.
      * @param viewMatrix    transformation matrix
      * @param oval          the bounding rect of the oval.
      * @param style         style to apply to the oval. Currently path effects are not allowed.
      */
     void drawOval(const GrClip&,
-                  const GrPaint& paint,
+                  GrPaint&& paint,
+                  GrAA,
                   const SkMatrix& viewMatrix,
                   const SkRect& oval,
                   const GrStyle& style);
-   /**
-    * Draws a partial arc of an oval.
-    *
-    * @param paint         describes how to color pixels.
-    * @param viewMatrix    transformation matrix.
-    * @param oval          the bounding rect of the oval.
-    * @param startAngle    starting angle in degrees.
-    * @param sweepAngle    angle to sweep in degrees. Must be in (-360, 360)
-    * @param useCenter     true means that the implied path begins at the oval center, connects as a
-    *                      line to the point indicated by the start contains the arc indicated by
-    *                      the sweep angle. If false the line beginning at the center point is
-    *                      omitted.
-    * @param style         style to apply to the oval.
-    */
+    /**
+     * Draws a partial arc of an oval.
+     *
+     * @param paint         describes how to color pixels.
+     * @param GrGrAA        Controls whether the arc is antialiased.
+     * @param viewMatrix    transformation matrix.
+     * @param oval          the bounding rect of the oval.
+     * @param startAngle    starting angle in degrees.
+     * @param sweepAngle    angle to sweep in degrees. Must be in (-360, 360)
+     * @param useCenter     true means that the implied path begins at the oval center, connects as
+     *                      a line to the point indicated by the start contains the arc indicated by
+     *                      the sweep angle. If false the line beginning at the center point is
+     *                      omitted.
+     * @param style         style to apply to the oval.
+     */
     void drawArc(const GrClip&,
-                 const GrPaint& paint,
+                 GrPaint&& paint,
+                 GrAA,
                  const SkMatrix& viewMatrix,
                  const SkRect& oval,
                  SkScalar startAngle,
@@ -286,7 +303,7 @@ public:
      * Draw the image as a set of rects, specified by |iter|.
      */
     void drawImageLattice(const GrClip&,
-                          const GrPaint& paint,
+                          GrPaint&& paint,
                           const SkMatrix& viewMatrix,
                           int imageWidth,
                           int imageHeight,
@@ -299,43 +316,11 @@ public:
      */
     void prepareForExternalIO();
 
-    /**
-     * Reads a rectangle of pixels from the render target context.
-     * @param dstInfo       image info for the destination
-     * @param dstBuffer     destination pixels for the read
-     * @param dstRowBytes   bytes in a row of 'dstBuffer'
-     * @param x             x offset w/in the render target context from which to read
-     * @param y             y offset w/in the render target context from which to read
-     *
-     * @return true if the read succeeded, false if not. The read can fail because of an
-     *              unsupported pixel config.
-     */
-    bool readPixels(const SkImageInfo& dstInfo, void* dstBuffer, size_t dstRowBytes, int x, int y);
-
-    /**
-     * Writes a rectangle of pixels [srcInfo, srcBuffer, srcRowbytes] into the 
-     * renderTargetContext at the specified position.
-     * @param srcInfo       image info for the source pixels
-     * @param srcBuffer     source for the write
-     * @param srcRowBytes   bytes in a row of 'srcBuffer'
-     * @param x             x offset w/in the render target context at which to write
-     * @param y             y offset w/in the render target context at which to write
-     *
-     * @return true if the write succeeded, false if not. The write can fail because of an
-     *              unsupported pixel config.
-     */
-    bool writePixels(const SkImageInfo& srcInfo, const void* srcBuffer, size_t srcRowBytes,
-                     int x, int y);
-
     bool isStencilBufferMultisampled() const {
         return fRenderTargetProxy->isStencilBufferMultisampled();
     }
     bool isUnifiedMultisampled() const { return fRenderTargetProxy->isUnifiedMultisampled(); }
     bool hasMixedSamples() const { return fRenderTargetProxy->isMixedSampled(); }
-
-    bool mustUseHWAA(const GrPaint& paint) const {
-        return paint.isAntiAlias() && fRenderTargetProxy->isUnifiedMultisampled();
-    }
 
     const GrCaps* caps() const { return fContext->caps(); }
     const GrSurfaceDesc& desc() const { return fRenderTargetProxy->desc(); }
@@ -343,13 +328,7 @@ public:
     int height() const { return fRenderTargetProxy->height(); }
     GrPixelConfig config() const { return fRenderTargetProxy->config(); }
     int numColorSamples() const { return fRenderTargetProxy->numColorSamples(); }
-    bool isGammaCorrect() const { return SkToBool(fColorSpace.get()); }
-    SkDestinationSurfaceColorMode colorMode() const {
-        return this->isGammaCorrect() ? SkDestinationSurfaceColorMode::kGammaAndColorSpaceAware
-                                      : SkDestinationSurfaceColorMode::kLegacy;
-    }
     const SkSurfaceProps& surfaceProps() const { return fSurfaceProps; }
-    SkColorSpace* getColorSpace() const { return fColorSpace.get(); }
     GrColorSpaceXform* getColorXformFromSRGB() const { return fColorXformFromSRGB.get(); }
     GrSurfaceOrigin origin() const { return fRenderTargetProxy->origin(); }
 
@@ -363,7 +342,9 @@ public:
         return fRenderTargetProxy->instantiate(fContext->textureProvider());
     }
 
-    GrTextureProxy* asDeferredTexture();
+    GrSurfaceProxy* asDeferredSurface() override { return fRenderTargetProxy.get(); }
+    GrTextureProxy* asDeferredTexture() override;
+    GrRenderTargetProxy* asDeferredRenderTarget() override { return fRenderTargetProxy.get(); }
 
     sk_sp<GrTexture> asTexture() {
         if (!this->accessRenderTarget()) {
@@ -382,16 +363,9 @@ public:
 
     bool isWrapped_ForTesting() const;
 
-    // These two methods return the worst case size of the backing GPU resource when it is
-    // finally allocated. In the approx-match case the allocated size could be smaller than
-    // what is reported by these entry points (i.e., Ganesh could, optionally, return an
-    // exact match)
-    int worstCaseWidth() const { return fRenderTargetProxy->worstCaseWidth(); }
-    int worstCaseHeight() const { return fRenderTargetProxy->worstCaseHeight(); }
-
 protected:
     GrRenderTargetContext(GrContext*, GrDrawingManager*, sk_sp<GrRenderTargetProxy>,
-                          sk_sp<SkColorSpace>, const SkSurfaceProps* surfaceProps, GrAuditTrail*,
+                          sk_sp<SkColorSpace>, const SkSurfaceProps*, GrAuditTrail*,
                           GrSingleOwner*);
 
     GrDrawingManager* drawingManager() { return fDrawingManager; }
@@ -399,59 +373,78 @@ protected:
     SkDEBUGCODE(void validate() const;)
 
 private:
-    friend class GrAtlasTextBlob; // for access to drawBatch
-    friend class GrStencilAndCoverTextContext; // for access to drawBatch
+    inline GrAAType decideAAType(GrAA aa, bool allowMixedSamples = false) {
+        if (GrAA::kNo == aa) {
+            return GrAAType::kNone;
+        }
+        if (this->isUnifiedMultisampled()) {
+            return GrAAType::kMSAA;
+        }
+        if (allowMixedSamples && this->isStencilBufferMultisampled()) {
+            return GrAAType::kMixedSamples;
+        }
+        return GrAAType::kCoverage;
+    }
+
+    friend class GrAtlasTextBlob; // for access to addDrawOp
+    friend class GrStencilAndCoverTextContext; // for access to addDrawOp
 
     friend class GrDrawingManager; // for ctor
     friend class GrRenderTargetContextPriv;
     friend class GrTestTarget;  // for access to getOpList
-    friend class GrSWMaskHelper;                 // for access to drawBatch
+    friend class GrSWMaskHelper;                 // for access to addDrawOp
 
-    // All the path renderers currently make their own batches
-    friend class GrSoftwarePathRenderer;         // for access to drawBatch
-    friend class GrAAConvexPathRenderer;         // for access to drawBatch
-    friend class GrDashLinePathRenderer;         // for access to drawBatch
-    friend class GrAAHairLinePathRenderer;       // for access to drawBatch
-    friend class GrAALinearizingConvexPathRenderer;  // for access to drawBatch
-    friend class GrAADistanceFieldPathRenderer;  // for access to drawBatch
-    friend class GrDefaultPathRenderer;          // for access to drawBatch
-    friend class GrPLSPathRenderer;              // for access to drawBatch
-    friend class GrMSAAPathRenderer;             // for access to drawBatch
-    friend class GrStencilAndCoverPathRenderer;  // for access to drawBatch
-    friend class GrTessellatingPathRenderer;     // for access to drawBatch
+    // All the path renderers currently make their own ops
+    friend class GrSoftwarePathRenderer;         // for access to addDrawOp
+    friend class GrAAConvexPathRenderer;         // for access to addDrawOp
+    friend class GrDashLinePathRenderer;         // for access to addDrawOp
+    friend class GrAAHairLinePathRenderer;       // for access to addDrawOp
+    friend class GrAALinearizingConvexPathRenderer;  // for access to addDrawOp
+    friend class GrAADistanceFieldPathRenderer;  // for access to addDrawOp
+    friend class GrDefaultPathRenderer;          // for access to addDrawOp
+    friend class GrPLSPathRenderer;              // for access to addDrawOp
+    friend class GrMSAAPathRenderer;             // for access to addDrawOp
+    friend class GrStencilAndCoverPathRenderer;  // for access to addDrawOp
+    friend class GrTessellatingPathRenderer;     // for access to addDrawOp
 
     void internalClear(const GrFixedClip&, const GrColor, bool canIgnoreClip);
 
+    // Only consumes the GrPaint if successful.
     bool drawFilledDRRect(const GrClip& clip,
-                          const GrPaint& paint,
+                          GrPaint&& paint,
+                          GrAA,
                           const SkMatrix& viewMatrix,
                           const SkRRect& origOuter,
                           const SkRRect& origInner);
 
+    // Only consumes the GrPaint if successful.
     bool drawFilledRect(const GrClip& clip,
-                        const GrPaint& paint,
+                        GrPaint&& paint,
+                        GrAA,
                         const SkMatrix& viewMatrix,
                         const SkRect& rect,
                         const GrUserStencilSettings* ss);
 
     void drawNonAAFilledRect(const GrClip&,
-                             const GrPaint&,
+                             GrPaint&&,
                              const SkMatrix& viewMatrix,
                              const SkRect& rect,
                              const SkRect* localRect,
                              const SkMatrix* localMatrix,
                              const GrUserStencilSettings* ss,
-                             bool useHWAA);
+                             GrAAType hwOrNoneAAType);
 
-    void internalDrawPath(const GrClip& clip,
-                          const GrPaint& paint,
-                          const SkMatrix& viewMatrix,
-                          const SkPath& path,
-                          const GrStyle& style);
+    void internalDrawPath(
+            const GrClip&, GrPaint&&, GrAA, const SkMatrix&, const SkPath&, const GrStyle&);
 
-    // This entry point allows the GrTextContext-derived classes to add their batches to
-    // the GrOpList.
-    void drawBatch(const GrPipelineBuilder& pipelineBuilder, const GrClip&, GrDrawOp* batch);
+    bool onCopy(GrSurfaceProxy* src, const SkIRect& srcRect, const SkIPoint& dstPoint) override;
+    bool onReadPixels(const SkImageInfo& dstInfo, void* dstBuffer,
+                      size_t dstRowBytes, int x, int y) override;
+    bool onWritePixels(const SkImageInfo& srcInfo, const void* srcBuffer,
+                       size_t srcRowBytes, int x, int y) override;
+
+    // This entry point allows the GrTextContext-derived classes to add their ops to the GrOpList.
+    void addDrawOp(const GrPipelineBuilder&, const GrClip&, std::unique_ptr<GrDrawOp>);
 
     GrRenderTargetOpList* getOpList();
 
@@ -463,9 +456,10 @@ private:
     GrRenderTargetOpList*             fOpList;
     GrInstancedPipelineInfo           fInstancedPipelineInfo;
 
-    sk_sp<SkColorSpace>               fColorSpace;
     sk_sp<GrColorSpaceXform>          fColorXformFromSRGB;
     SkSurfaceProps                    fSurfaceProps;
+
+    typedef GrSurfaceContext INHERITED;
 };
 
 #endif

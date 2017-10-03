@@ -100,21 +100,21 @@ sk_sp<GrTextureProxy> SkAlphaThresholdFilterImpl::createMaskTexture(GrContext* c
                                                                     const SkMatrix& inMatrix,
                                                                     const SkIRect& bounds) const {
 
-    sk_sp<GrRenderTargetContext> rtContext(context->makeRenderTargetContextWithFallback(
+    sk_sp<GrRenderTargetContext> rtContext(context->makeDeferredRenderTargetContextWithFallback(
         SkBackingFit::kApprox, bounds.width(), bounds.height(), kAlpha_8_GrPixelConfig, nullptr));
     if (!rtContext) {
         return nullptr;
     }
 
-    GrPaint grPaint;
-    grPaint.setPorterDuffXPFactory(SkBlendMode::kSrc);
+    GrPaint paint;
+    paint.setPorterDuffXPFactory(SkBlendMode::kSrc);
     SkRegion::Iterator iter(fRegion);
     rtContext->clear(nullptr, 0x0, true);
 
     GrFixedClip clip(SkIRect::MakeWH(bounds.width(), bounds.height()));
     while (!iter.done()) {
         SkRect rect = SkRect::Make(iter.rect());
-        rtContext->drawRect(clip, grPaint, inMatrix, rect);
+        rtContext->drawRect(clip, std::move(paint), GrAA::kNo, inMatrix, rect);
         iter.next();
     }
 
@@ -225,8 +225,9 @@ sk_sp<SkSpecialImage> SkAlphaThresholdFilterImpl::onFilterImage(SkSpecialImage* 
     U8CPU outerThreshold = (U8CPU)(fOuterThreshold * 0xFF);
     SkColor* dptr = dst.getAddr32(0, 0);
     int dstWidth = dst.width(), dstHeight = dst.height();
+    SkIPoint srcOffset = { bounds.fLeft - inputOffset.fX, bounds.fTop - inputOffset.fY };
     for (int y = 0; y < dstHeight; ++y) {
-        const SkColor* sptr = inputBM.getAddr32(bounds.fLeft, bounds.fTop+y);
+        const SkColor* sptr = inputBM.getAddr32(srcOffset.fX, srcOffset.fY+y);
 
         for (int x = 0; x < dstWidth; ++x) {
             const SkColor& source = sptr[x];

@@ -27,11 +27,13 @@ class SK_API GrTextureContext : public GrSurfaceContext {
 public:
     ~GrTextureContext() override;
 
-    bool copySurface(GrSurface* src, const SkIRect& srcRect, const SkIPoint& dstPoint) override;
+    GrSurfaceProxy* asDeferredSurface() override { return fTextureProxy.get(); }
+    GrTextureProxy* asDeferredTexture() override { return fTextureProxy.get(); }
+    GrRenderTargetProxy* asDeferredRenderTarget() override;
 
 protected:
-    GrTextureContext(GrContext*, GrDrawingManager*, sk_sp<GrTextureProxy>, GrAuditTrail*,
-                     GrSingleOwner*);
+    GrTextureContext(GrContext*, GrDrawingManager*, sk_sp<GrTextureProxy>,
+                     sk_sp<SkColorSpace>, GrAuditTrail*, GrSingleOwner*);
 
     GrDrawingManager* drawingManager() { return fDrawingManager; }
 
@@ -39,6 +41,12 @@ protected:
 
 private:
     friend class GrDrawingManager; // for ctor
+
+    bool onCopy(GrSurfaceProxy* src, const SkIRect& srcRect, const SkIPoint& dstPoint) override;
+    bool onReadPixels(const SkImageInfo& dstInfo, void* dstBuffer,
+                      size_t dstRowBytes, int x, int y) override;
+    bool onWritePixels(const SkImageInfo& srcInfo, const void* srcBuffer,
+                       size_t srcRowBytes, int x, int y) override;
 
     GrTextureOpList* getOpList();
 
@@ -48,6 +56,8 @@ private:
     // In MDB-mode the GrOpList can be closed by some other renderTargetContext that has picked
     // it up. For this reason, the GrOpList should only ever be accessed via 'getOpList'.
     GrTextureOpList*             fOpList;
+
+    typedef GrSurfaceContext INHERITED;
 };
 
 #endif

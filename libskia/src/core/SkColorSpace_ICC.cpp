@@ -5,13 +5,15 @@
  * found in the LICENSE file.
  */
 
+#include "SkAutoMalloc.h"
 #include "SkColorSpace.h"
+#include "SkColorSpacePriv.h"
 #include "SkColorSpace_A2B.h"
 #include "SkColorSpace_Base.h"
 #include "SkColorSpace_XYZ.h"
-#include "SkColorSpacePriv.h"
 #include "SkEndian.h"
 #include "SkFixed.h"
+#include "SkICCPriv.h"
 #include "SkTemplates.h"
 
 #define return_if_false(pred, msg)                                   \
@@ -40,23 +42,7 @@ static int32_t read_big_endian_i32(const uint8_t* ptr) {
     return (int32_t) read_big_endian_u32(ptr);
 }
 
-// This is equal to the header size according to the ICC specification (128)
-// plus the size of the tag count (4).  We include the tag count since we
-// always require it to be present anyway.
-static constexpr size_t kICCHeaderSize = 132;
-
-// Contains a signature (4), offset (4), and size (4).
-static constexpr size_t kICCTagTableEntrySize = 12;
-
-static constexpr uint32_t kRGB_ColorSpace     = SkSetFourByteTag('R', 'G', 'B', ' ');
-static constexpr uint32_t kCMYK_ColorSpace    = SkSetFourByteTag('C', 'M', 'Y', 'K');
-static constexpr uint32_t kDisplay_Profile    = SkSetFourByteTag('m', 'n', 't', 'r');
-static constexpr uint32_t kInput_Profile      = SkSetFourByteTag('s', 'c', 'n', 'r');
-static constexpr uint32_t kOutput_Profile     = SkSetFourByteTag('p', 'r', 't', 'r');
-static constexpr uint32_t kColorSpace_Profile = SkSetFourByteTag('s', 'p', 'a', 'c');
-static constexpr uint32_t kXYZ_PCSSpace       = SkSetFourByteTag('X', 'Y', 'Z', ' ');
-static constexpr uint32_t kLAB_PCSSpace       = SkSetFourByteTag('L', 'a', 'b', ' ');
-static constexpr uint32_t kACSP_Signature     = SkSetFourByteTag('a', 'c', 's', 'p');
+static constexpr float kWhitePointD50[] = { 0.96420f, 1.00000f, 0.82491f, };
 
 struct ICCProfileHeader {
     uint32_t fSize;
@@ -135,6 +121,9 @@ struct ICCProfileHeader {
             case kCMYK_ColorSpace:
                 SkColorSpacePrintf("CMYK Input Color Space\n");
                 break;
+            case kGray_ColorSpace:
+                SkColorSpacePrintf("Gray Input Color Space\n");
+                break;
             default:
                 SkColorSpacePrintf("Unsupported Input Color Space: %c%c%c%c\n",
                                    (fInputColorSpace>>24)&0xFF, (fInputColorSpace>>16)&0xFF,
@@ -169,10 +158,11 @@ struct ICCProfileHeader {
             SkColorSpacePrintf("Warning, bad rendering intent.\n");
         }
 
-        return_if_false(color_space_almost_equal(SkFixedToFloat(fIlluminantXYZ[0]), 0.96420f) &&
-                        color_space_almost_equal(SkFixedToFloat(fIlluminantXYZ[1]), 1.00000f) &&
-                        color_space_almost_equal(SkFixedToFloat(fIlluminantXYZ[2]), 0.82491f),
-                        "Illuminant must be D50");
+        return_if_false(
+                color_space_almost_equal(SkFixedToFloat(fIlluminantXYZ[0]), kWhitePointD50[0]) &&
+                color_space_almost_equal(SkFixedToFloat(fIlluminantXYZ[1]), kWhitePointD50[1]) &&
+                color_space_almost_equal(SkFixedToFloat(fIlluminantXYZ[2]), kWhitePointD50[2]),
+                "Illuminant must be D50");
 
         return_if_false(fTagCount <= 100, "Too many tags");
 
@@ -239,14 +229,6 @@ struct ICCTag {
     }
 };
 
-static constexpr uint32_t kTAG_rXYZ = SkSetFourByteTag('r', 'X', 'Y', 'Z');
-static constexpr uint32_t kTAG_gXYZ = SkSetFourByteTag('g', 'X', 'Y', 'Z');
-static constexpr uint32_t kTAG_bXYZ = SkSetFourByteTag('b', 'X', 'Y', 'Z');
-static constexpr uint32_t kTAG_rTRC = SkSetFourByteTag('r', 'T', 'R', 'C');
-static constexpr uint32_t kTAG_gTRC = SkSetFourByteTag('g', 'T', 'R', 'C');
-static constexpr uint32_t kTAG_bTRC = SkSetFourByteTag('b', 'T', 'R', 'C');
-static constexpr uint32_t kTAG_A2B0 = SkSetFourByteTag('A', '2', 'B', '0');
-
 static bool load_xyz(float dst[3], const uint8_t* src, size_t len) {
     if (len < 20) {
         SkColorSpacePrintf("XYZ tag is too small (%d bytes)", len);
@@ -259,9 +241,6 @@ static bool load_xyz(float dst[3], const uint8_t* src, size_t len) {
     SkColorSpacePrintf("XYZ %g %g %g\n", dst[0], dst[1], dst[2]);
     return true;
 }
-
-static constexpr uint32_t kTAG_CurveType     = SkSetFourByteTag('c', 'u', 'r', 'v');
-static constexpr uint32_t kTAG_ParaCurveType = SkSetFourByteTag('p', 'a', 'r', 'a');
 
 static SkGammas::Type set_gamma_value(SkGammas::Data* data, float value) {
     if (color_space_almost_equal(2.2f, value)) {
@@ -400,14 +379,6 @@ static SkGammas::Type parse_gamma(SkGammas::Data* outData, SkColorSpaceTransferF
             return SkGammas::Type::kTable_Type;
         }
         case kTAG_ParaCurveType: {
-            enum ParaCurveType {
-                kExponential_ParaCurveType = 0,
-                kGAB_ParaCurveType         = 1,
-                kGABC_ParaCurveType        = 2,
-                kGABDE_ParaCurveType       = 3,
-                kGABCDEF_ParaCurveType     = 4,
-            };
-
             // Determine the format of the parametric curve tag.
             uint16_t format = read_big_endian_u16(src + 8);
             if (format > kGABCDEF_ParaCurveType) {
@@ -432,8 +403,8 @@ static SkGammas::Type parse_gamma(SkGammas::Data* outData, SkColorSpaceTransferF
             // Here's where the real parametric gammas start.  There are many
             // permutations of the same equations.
             //
-            // Y = (aX + b)^g + c  for X >= d
-            // Y = eX + f          otherwise
+            // Y = (aX + b)^g + e  for X >= d
+            // Y = cX + f          otherwise
             //
             // We will fill in with zeros as necessary to always match the above form.
             if (len < 24) {
@@ -459,11 +430,11 @@ static SkGammas::Type parse_gamma(SkGammas::Data* outData, SkColorSpaceTransferF
                         return SkGammas::Type::kNone_Type;
                     }
 
-                    // Y = (aX + b)^g + c  for X >= -b/a
-                    // Y = c               otherwise
-                    c = read_big_endian_16_dot_16(src + 24);
+                    // Y = (aX + b)^g + e  for X >= -b/a
+                    // Y = e               otherwise
+                    e = read_big_endian_16_dot_16(src + 24);
                     d = -b / a;
-                    f = c;
+                    f = e;
                     break;
                 case kGABDE_ParaCurveType:
                     tagBytes = 12 + 20;
@@ -473,14 +444,9 @@ static SkGammas::Type parse_gamma(SkGammas::Data* outData, SkColorSpaceTransferF
                     }
 
                     // Y = (aX + b)^g  for X >= d
-                    // Y = eX          otherwise
+                    // Y = cX          otherwise
+                    c = read_big_endian_16_dot_16(src + 24);
                     d = read_big_endian_16_dot_16(src + 28);
-
-                    // Not a bug!  We define |e| to always be the coefficient on X in the
-                    // second equation.  The spec calls this |c| in this particular equation.
-                    // We don't follow their convention because then |c| would have a
-                    // different meaning in each of our cases.
-                    e = read_big_endian_16_dot_16(src + 24);
                     break;
                 case kGABCDEF_ParaCurveType:
                     tagBytes = 12 + 28;
@@ -489,10 +455,8 @@ static SkGammas::Type parse_gamma(SkGammas::Data* outData, SkColorSpaceTransferF
                         return SkGammas::Type::kNone_Type;
                     }
 
-                    // Y = (aX + b)^g + c  for X >= d
-                    // Y = eX + f          otherwise
-                    // NOTE: The ICC spec writes "cX" in place of "eX" but I think
-                    //       it's a typo.
+                    // Y = (aX + b)^g + e  for X >= d
+                    // Y = cX + f          otherwise
                     c = read_big_endian_16_dot_16(src + 24);
                     d = read_big_endian_16_dot_16(src + 28);
                     e = read_big_endian_16_dot_16(src + 32);
@@ -855,8 +819,22 @@ static bool parse_and_load_gamma(SkGammaNamed* gammaNamed, sk_sp<SkGammas>* gamm
     return true;
 }
 
-static bool load_lut_gammas(sk_sp<SkGammas>* gammas, size_t numTables, size_t entriesPerTable,
-                            size_t precision, const uint8_t* src, size_t len) {
+static bool is_lut_gamma_linear(const uint8_t* src, size_t count, size_t precision) {
+    // check for linear gamma (this is very common in lut gammas, as they aren't optional)
+    const float normalizeX = 1.f / (count - 1);
+    for (uint32_t x = 0; x < count; ++x) {
+        const float y = precision == 1 ? (src[x] / 255.f)
+                                       : (read_big_endian_u16(src + 2*x) / 65535.f);
+        if (!color_space_almost_equal(x * normalizeX, y)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool load_lut_gammas(sk_sp<SkGammas>* gammas, SkGammaNamed* gammaNamed, size_t numTables,
+                            size_t entriesPerTable, size_t precision, const uint8_t* src,
+                            size_t len) {
     if (precision != 1 && precision != 2) {
         SkColorSpacePrintf("Invalid gamma table precision %d\n", precision);
         return false;
@@ -884,6 +862,14 @@ static bool load_lut_gammas(sk_sp<SkGammas>* gammas, size_t numTables, size_t en
             break;
         }
     }
+
+    if (1 == numTablesToUse) {
+        if (is_lut_gamma_linear(src, entriesPerTable, precision)) {
+            *gammaNamed = kLinear_SkGammaNamed;
+            return true;
+        }
+    }
+    *gammaNamed = kNonStandard_SkGammaNamed;
 
     uint32_t writetableBytes;
     return_if_false(safe_mul(numTablesToUse, writeBytesPerChannel, &writetableBytes),
@@ -1086,8 +1072,11 @@ bool load_a2b0_lutn_type(std::vector<SkColorSpace_A2B::Element>* elements, const
         // ICC specs (10.8/10.9) say lut8/16Type profiles must have identity matrices
         // if the input color space is not PCSXYZ, and we do not support PCSXYZ input color spaces
         // so we should never encounter a non-identity matrix here.
-        SkColorSpacePrintf("non-Identity matrix found in non-XYZ input color space lut profile");
-        return false;
+        // However, 2 test images from the ICC website have RGB input spaces and non-identity
+        // matrices so we're not going to fail here, despite being against the spec.
+        SkColorSpacePrintf("Warning: non-Identity matrix found in non-XYZ input color space"
+                           "lut profile");
+        elements->push_back(SkColorSpace_A2B::Element(matrix));
     }
 
     size_t dataOffset      = 48;
@@ -1127,13 +1116,13 @@ bool load_a2b0_lutn_type(std::vector<SkColorSpace_A2B::Element>* elements, const
     const size_t inputOffset = dataOffset;
     return_if_false(len >= inputOffset, "A2B0 lutnType tag too small for input gamma table");
     sk_sp<SkGammas> inputGammas;
-    if (!load_lut_gammas(&inputGammas, inputChannels, inTableEntries, precision,
+    SkGammaNamed inputGammaNamed;
+    if (!load_lut_gammas(&inputGammas, &inputGammaNamed, inputChannels, inTableEntries, precision,
                          src + inputOffset, len - inputOffset)) {
         SkColorSpacePrintf("Failed to read input gammas from lutnType tag.\n");
         return false;
     }
-    SkASSERT(inputGammas);
-    const SkGammaNamed inputGammaNamed = is_named(inputGammas);
+    SkASSERT(inputGammas || inputGammaNamed != kNonStandard_SkGammaNamed);
     if (kLinear_SkGammaNamed != inputGammaNamed) {
         if (kNonStandard_SkGammaNamed != inputGammaNamed) {
             elements->push_back(SkColorSpace_A2B::Element(inputGammaNamed, inputChannels));
@@ -1163,13 +1152,13 @@ bool load_a2b0_lutn_type(std::vector<SkColorSpace_A2B::Element>* elements, const
     const size_t outputOffset = clutOffset + clutSize;
     return_if_false(len >= outputOffset, "A2B0 lutnType tag too small for output gamma table");
     sk_sp<SkGammas> outputGammas;
-    if (!load_lut_gammas(&outputGammas, outputChannels, outTableEntries, precision,
-                         src + outputOffset, len - outputOffset)) {
+    SkGammaNamed outputGammaNamed;
+    if (!load_lut_gammas(&outputGammas, &outputGammaNamed, outputChannels, outTableEntries,
+                         precision, src + outputOffset, len - outputOffset)) {
         SkColorSpacePrintf("Failed to read output gammas from lutnType tag.\n");
         return false;
     }
-    SkASSERT(outputGammas);
-    const SkGammaNamed outputGammaNamed = is_named(outputGammas);
+    SkASSERT(outputGammas || outputGammaNamed != kNonStandard_SkGammaNamed);
     if (kLinear_SkGammaNamed != outputGammaNamed) {
         if (kNonStandard_SkGammaNamed != outputGammaNamed) {
             elements->push_back(SkColorSpace_A2B::Element(outputGammaNamed, outputChannels));
@@ -1181,21 +1170,21 @@ bool load_a2b0_lutn_type(std::vector<SkColorSpace_A2B::Element>* elements, const
     return true;
 }
 
-static inline int icf_channels(SkColorSpace_Base::InputColorFormat inputColorFormat) {
-    switch (inputColorFormat) {
-        case SkColorSpace_Base::InputColorFormat::kRGB:
+static inline int icf_channels(SkColorSpace_Base::ICCTypeFlag iccType) {
+    switch (iccType) {
+        case SkColorSpace_Base::kRGB_ICCTypeFlag:
             return 3;
-        case SkColorSpace_Base::InputColorFormat::kCMYK:
+        case SkColorSpace_Base::kCMYK_ICCTypeFlag:
             return 4;
         default:
             SkASSERT(false);
-            return -1;
+            return 0;
     }
 }
 
 static bool load_a2b0(std::vector<SkColorSpace_A2B::Element>* elements, const uint8_t* src,
                       size_t len, SkColorSpace_A2B::PCS pcs,
-                      SkColorSpace_Base::InputColorFormat inputColorFormat) {
+                      SkColorSpace_Base::ICCTypeFlag iccType) {
     const uint32_t type = read_big_endian_u32(src);
     switch (type) {
         case kTAG_AtoBType:
@@ -1236,10 +1225,10 @@ static bool load_a2b0(std::vector<SkColorSpace_A2B::Element>* elements, const ui
     SkASSERT(SkColorSpace_A2B::PCS::kLAB == pcs || SkColorSpace_A2B::PCS::kXYZ == pcs);
     static constexpr int kPCSChannels = 3; // must be PCSLAB or PCSXYZ
     if (elements->empty()) {
-        return kPCSChannels == icf_channels(inputColorFormat);
+        return kPCSChannels == icf_channels(iccType);
     }
     // now let's verify that the input/output channels of each A2B element actually match up
-    if (icf_channels(inputColorFormat) != elements->front().inputChannels()) {
+    if (icf_channels(iccType) != elements->front().inputChannels()) {
         SkColorSpacePrintf("Input channel count does not match first A2B element's input count");
         return false;
     }
@@ -1290,12 +1279,209 @@ static inline bool is_close_to_d50(const SkMatrix44& matrix) {
            (SkTAbs(Z - kD50_WhitePoint[2]) <= 0.04f);
 }
 
+static sk_sp<SkColorSpace> make_xyz(const ICCProfileHeader& header, ICCTag* tags, int tagCount,
+                                    const uint8_t* base, sk_sp<SkData> profileData) {
+    if (kLAB_PCSSpace == header.fPCS) {
+        return nullptr;
+    }
+
+    // Recognize the rXYZ, gXYZ, and bXYZ tags.
+    const ICCTag* r = ICCTag::Find(tags, tagCount, kTAG_rXYZ);
+    const ICCTag* g = ICCTag::Find(tags, tagCount, kTAG_gXYZ);
+    const ICCTag* b = ICCTag::Find(tags, tagCount, kTAG_bXYZ);
+    if (!r || !g || !b) {
+        return nullptr;
+    }
+
+    float toXYZ[9];
+    if (!load_xyz(&toXYZ[0], r->addr(base), r->fLength) ||
+        !load_xyz(&toXYZ[3], g->addr(base), g->fLength) ||
+        !load_xyz(&toXYZ[6], b->addr(base), b->fLength))
+    {
+        return_null("Need valid rgb tags for XYZ space");
+    }
+    SkMatrix44 mat(SkMatrix44::kUninitialized_Constructor);
+    mat.set3x3(toXYZ[0], toXYZ[1], toXYZ[2],
+               toXYZ[3], toXYZ[4], toXYZ[5],
+               toXYZ[6], toXYZ[7], toXYZ[8]);
+    if (!is_close_to_d50(mat)) {
+        return_null("XYZ matrix is not D50");
+    }
+
+    // If some, but not all, of the gamma tags are missing, assume that all
+    // gammas are meant to be the same.
+    r = ICCTag::Find(tags, tagCount, kTAG_rTRC);
+    g = ICCTag::Find(tags, tagCount, kTAG_gTRC);
+    b = ICCTag::Find(tags, tagCount, kTAG_bTRC);
+    if ((!r || !g || !b)) {
+        if (!r) {
+            r = g ? g : b;
+        }
+        if (!g) {
+            g = r ? r : b;
+        }
+        if (!b) {
+            b = r ? r : g;
+        }
+    }
+
+    SkGammaNamed gammaNamed = kNonStandard_SkGammaNamed;
+    sk_sp<SkGammas> gammas = nullptr;
+    size_t tagBytes;
+    if (r && g && b) {
+        if (tag_equals(r, g, base) && tag_equals(g, b, base)) {
+            SkGammas::Data data;
+            SkColorSpaceTransferFn params;
+            SkGammas::Type type =
+                    parse_gamma(&data, &params, &tagBytes, r->addr(base), r->fLength);
+            handle_invalid_gamma(&type, &data);
+
+            if (SkGammas::Type::kNamed_Type == type) {
+                gammaNamed = data.fNamed;
+            } else {
+                size_t allocSize = sizeof(SkGammas);
+                if (!safe_add(allocSize, gamma_alloc_size(type, data), &allocSize)) {
+                    return_null("SkGammas struct is too large to allocate");
+                }
+                void* memory = sk_malloc_throw(allocSize);
+                gammas = sk_sp<SkGammas>(new (memory) SkGammas(3));
+                load_gammas(memory, 0, type, &data, params, r->addr(base));
+
+                for (int i = 0; i < 3; ++i) {
+                    gammas->fType[i] = type;
+                    gammas->fData[i] = data;
+                }
+            }
+        } else {
+            SkGammas::Data rData;
+            SkColorSpaceTransferFn rParams;
+            SkGammas::Type rType =
+                    parse_gamma(&rData, &rParams, &tagBytes, r->addr(base), r->fLength);
+            handle_invalid_gamma(&rType, &rData);
+
+            SkGammas::Data gData;
+            SkColorSpaceTransferFn gParams;
+            SkGammas::Type gType =
+                    parse_gamma(&gData, &gParams, &tagBytes, g->addr(base), g->fLength);
+            handle_invalid_gamma(&gType, &gData);
+
+            SkGammas::Data bData;
+            SkColorSpaceTransferFn bParams;
+            SkGammas::Type bType =
+                    parse_gamma(&bData, &bParams, &tagBytes, b->addr(base), b->fLength);
+            handle_invalid_gamma(&bType, &bData);
+
+            size_t allocSize = sizeof(SkGammas);
+            if (!safe_add(allocSize, gamma_alloc_size(rType, rData), &allocSize) ||
+                !safe_add(allocSize, gamma_alloc_size(gType, gData), &allocSize) ||
+                !safe_add(allocSize, gamma_alloc_size(bType, bData), &allocSize)) {
+                return_null("SkGammas struct is too large to allocate");
+            }
+            void* memory = sk_malloc_throw(allocSize);
+            gammas = sk_sp<SkGammas>(new (memory) SkGammas(3));
+
+            uint32_t offset = 0;
+            gammas->fType[0] = rType;
+            offset += load_gammas(memory, offset, rType, &rData, rParams,
+                                  r->addr(base));
+
+            gammas->fType[1] = gType;
+            offset += load_gammas(memory, offset, gType, &gData, gParams,
+                                  g->addr(base));
+
+            gammas->fType[2] = bType;
+            load_gammas(memory, offset, bType, &bData, bParams, b->addr(base));
+
+            gammas->fData[0] = rData;
+            gammas->fData[1] = gData;
+            gammas->fData[2] = bData;
+        }
+    } else {
+        // Guess sRGB if the profile is missing transfer functions.
+        gammaNamed = kSRGB_SkGammaNamed;
+    }
+
+    if (kNonStandard_SkGammaNamed == gammaNamed) {
+        // It's possible that we'll initially detect non-matching gammas, only for
+        // them to evaluate to the same named gamma curve.
+        gammaNamed = is_named(gammas);
+    }
+
+    if (kNonStandard_SkGammaNamed == gammaNamed) {
+        return sk_sp<SkColorSpace>(new SkColorSpace_XYZ(gammaNamed,
+                                                        std::move(gammas),
+                                                        mat, std::move(profileData)));
+    }
+
+    return SkColorSpace_Base::MakeRGB(gammaNamed, mat);
+}
+
+static sk_sp<SkColorSpace> make_gray(const ICCProfileHeader& header, ICCTag* tags, int tagCount,
+                                     const uint8_t* base, sk_sp<SkData> profileData) {
+    if (kLAB_PCSSpace == header.fPCS) {
+        return nullptr;
+    }
+
+    const ICCTag* grayTRC = ICCTag::Find(tags, tagCount, kTAG_kTRC);
+    if (!grayTRC) {
+        return_null("grayTRC tag required for monochrome profiles.");
+    }
+    SkGammas::Data data;
+    SkColorSpaceTransferFn params;
+    size_t tagBytes;
+    SkGammas::Type type =
+            parse_gamma(&data, &params, &tagBytes, grayTRC->addr(base), grayTRC->fLength);
+    handle_invalid_gamma(&type, &data);
+
+    SkMatrix44 toXYZD50(SkMatrix44::kIdentity_Constructor);
+    toXYZD50.setFloat(0, 0, kWhitePointD50[0]);
+    toXYZD50.setFloat(1, 1, kWhitePointD50[1]);
+    toXYZD50.setFloat(2, 2, kWhitePointD50[2]);
+    if (SkGammas::Type::kNamed_Type == type) {
+        return SkColorSpace_Base::MakeRGB(data.fNamed, toXYZD50);
+    }
+
+    size_t allocSize = sizeof(SkGammas);
+    if (!safe_add(allocSize, gamma_alloc_size(type, data), &allocSize)) {
+        return_null("SkGammas struct is too large to allocate");
+    }
+    void* memory = sk_malloc_throw(allocSize);
+    sk_sp<SkGammas> gammas = sk_sp<SkGammas>(new (memory) SkGammas(3));
+    load_gammas(memory, 0, type, &data, params, grayTRC->addr(base));
+    for (int i = 0; i < 3; ++i) {
+        gammas->fType[i] = type;
+        gammas->fData[i] = data;
+    }
+
+    return sk_sp<SkColorSpace>(new SkColorSpace_XYZ(kNonStandard_SkGammaNamed,
+                                                    std::move(gammas),
+                                                    toXYZD50, std::move(profileData)));
+}
+
+static sk_sp<SkColorSpace> make_a2b(SkColorSpace_Base::ICCTypeFlag iccType,
+                                    const ICCProfileHeader& header, ICCTag* tags, int tagCount,
+                                    const uint8_t* base, sk_sp<SkData> profileData) {
+    const ICCTag* a2b0 = ICCTag::Find(tags, tagCount, kTAG_A2B0);
+    if (a2b0) {
+        const SkColorSpace_A2B::PCS pcs = kXYZ_PCSSpace == header.fPCS
+                                        ? SkColorSpace_A2B::PCS::kXYZ
+                                        : SkColorSpace_A2B::PCS::kLAB;
+        std::vector<SkColorSpace_A2B::Element> elements;
+        if (load_a2b0(&elements, a2b0->addr(base), a2b0->fLength, pcs, iccType)) {
+            return sk_sp<SkColorSpace>(new SkColorSpace_A2B(iccType, std::move(elements),
+                                                            pcs, std::move(profileData)));
+        }
+    }
+
+    return nullptr;
+}
+
 sk_sp<SkColorSpace> SkColorSpace::MakeICC(const void* input, size_t len) {
-    return SkColorSpace_Base::MakeICC(input, len, SkColorSpace_Base::InputColorFormat::kRGB);
+    return SkColorSpace_Base::MakeICC(input, len, SkColorSpace_Base::kRGB_ICCTypeFlag);
 }
 
 sk_sp<SkColorSpace> SkColorSpace_Base::MakeICC(const void* input, size_t len,
-                                               InputColorFormat inputColorFormat) {
+                                               ICCTypeFlag desiredType) {
     if (!input || len < kICCHeaderSize) {
         return_null("Data is null or not large enough to contain an ICC profile");
     }
@@ -1303,8 +1489,8 @@ sk_sp<SkColorSpace> SkColorSpace_Base::MakeICC(const void* input, size_t len,
     // Create our own copy of the input.
     void* memory = sk_malloc_throw(len);
     memcpy(memory, input, len);
-    sk_sp<SkData> data = SkData::MakeFromMalloc(memory, len);
-    const uint8_t* base = data->bytes();
+    sk_sp<SkData> profileData = SkData::MakeFromMalloc(memory, len);
+    const uint8_t* base = profileData->bytes();
     const uint8_t* ptr = base;
 
     // Read the ICC profile header and check to make sure that it is valid.
@@ -1312,22 +1498,6 @@ sk_sp<SkColorSpace> SkColorSpace_Base::MakeICC(const void* input, size_t len,
     header.init(ptr, len);
     if (!header.valid()) {
         return nullptr;
-    }
-
-    switch (inputColorFormat) {
-        case InputColorFormat::kRGB:
-            if (header.fInputColorSpace != kRGB_ColorSpace) {
-                return_null("Provided input color format (RGB) does not match profile.\n");
-            }
-            break;
-        case InputColorFormat::kCMYK:
-            if (header.fInputColorSpace != kCMYK_ColorSpace) {
-                return_null("Provided input color format (CMYK) does not match profile.\n");
-                return nullptr;
-            }
-            break;
-        default:
-            return_null("Provided input color format not supported");
     }
 
     // Adjust ptr and len before reading the tags.
@@ -1359,412 +1529,38 @@ sk_sp<SkColorSpace> SkColorSpace_Base::MakeICC(const void* input, size_t len,
         }
     }
 
-    // Recognize color profile specified by A2B0 tag.
-    // this must be done before XYZ profile checking, as a profile can have both
-    // in which case we should use the A2B case to be accurate
-    // (XYZ is there as a fallback / quick preview)
-    const ICCTag* a2b0 = ICCTag::Find(tags.get(), tagCount, kTAG_A2B0);
-    if (a2b0) {
-        const SkColorSpace_A2B::PCS pcs = kXYZ_PCSSpace == header.fPCS
-                                        ? SkColorSpace_A2B::PCS::kXYZ
-                                        : SkColorSpace_A2B::PCS::kLAB;
-        std::vector<SkColorSpace_A2B::Element> elements;
-        if (load_a2b0(&elements, a2b0->addr(base), a2b0->fLength, pcs, inputColorFormat)) {
-            return sk_sp<SkColorSpace>(new SkColorSpace_A2B(inputColorFormat, std::move(elements),
-                                                            pcs, std::move(data)));
+    switch (header.fInputColorSpace) {
+        case kRGB_ColorSpace: {
+            if (!(kRGB_ICCTypeFlag & desiredType)) {
+                return_null("Provided input color format (RGB) does not match profile.");
+            }
+
+            sk_sp<SkColorSpace> colorSpace =
+                    make_xyz(header, tags.get(), tagCount, base, profileData);
+            if (colorSpace) {
+                return colorSpace;
+            }
+
+            desiredType = kRGB_ICCTypeFlag;
+            break;
         }
-        SkColorSpacePrintf("Ignoring malformed A2B0 tag.\n");
-    }
-
-    if (kRGB_ColorSpace == header.fInputColorSpace) {
-        // Recognize the rXYZ, gXYZ, and bXYZ tags.
-        const ICCTag* r = ICCTag::Find(tags.get(), tagCount, kTAG_rXYZ);
-        const ICCTag* g = ICCTag::Find(tags.get(), tagCount, kTAG_gXYZ);
-        const ICCTag* b = ICCTag::Find(tags.get(), tagCount, kTAG_bXYZ);
-        // Lab PCS means the profile is required to be an n-component LUT-based
-        // profile, so 3-component matrix-based profiles can only have an XYZ PCS
-        if (r && g && b && kXYZ_PCSSpace == header.fPCS) {
-            float toXYZ[9];
-            if (!load_xyz(&toXYZ[0], r->addr(base), r->fLength) ||
-                !load_xyz(&toXYZ[3], g->addr(base), g->fLength) ||
-                !load_xyz(&toXYZ[6], b->addr(base), b->fLength))
-            {
-                return_null("Need valid rgb tags for XYZ space");
-            }
-            SkMatrix44 mat(SkMatrix44::kUninitialized_Constructor);
-            mat.set3x3(toXYZ[0], toXYZ[1], toXYZ[2],
-                       toXYZ[3], toXYZ[4], toXYZ[5],
-                       toXYZ[6], toXYZ[7], toXYZ[8]);
-            if (!is_close_to_d50(mat)) {
-                // QCMS treats these profiles as "bogus".  I'm not sure if that's
-                // correct, but we certainly do not handle non-D50 matrices
-                // correctly.  So I'll disable this for now.
-                SkColorSpacePrintf("Matrix is not close to D50");
-                return nullptr;
+        case kGray_ColorSpace: {
+            if (!(kGray_ICCTypeFlag & desiredType)) {
+                return_null("Provided input color format (Gray) does not match profile.");
             }
 
-            r = ICCTag::Find(tags.get(), tagCount, kTAG_rTRC);
-            g = ICCTag::Find(tags.get(), tagCount, kTAG_gTRC);
-            b = ICCTag::Find(tags.get(), tagCount, kTAG_bTRC);
-
-            // If some, but not all, of the gamma tags are missing, assume that all
-            // gammas are meant to be the same.  This behavior is an arbitrary guess,
-            // but it simplifies the code below.
-            if ((!r || !g || !b) && (r || g || b)) {
-                if (!r) {
-                    r = g ? g : b;
-                }
-
-                if (!g) {
-                    g = r ? r : b;
-                }
-
-                if (!b) {
-                    b = r ? r : g;
-                }
-            }
-
-            SkGammaNamed gammaNamed = kNonStandard_SkGammaNamed;
-            sk_sp<SkGammas> gammas = nullptr;
-            size_t tagBytes;
-            if (r && g && b) {
-                if (tag_equals(r, g, base) && tag_equals(g, b, base)) {
-                    SkGammas::Data data;
-                    SkColorSpaceTransferFn params;
-                    SkGammas::Type type =
-                            parse_gamma(&data, &params, &tagBytes, r->addr(base), r->fLength);
-                    handle_invalid_gamma(&type, &data);
-
-                    if (SkGammas::Type::kNamed_Type == type) {
-                        gammaNamed = data.fNamed;
-                    } else {
-                        SkGammas::Data rData;
-                        SkColorSpaceTransferFn rParams;
-                        SkGammas::Type rType =
-                                parse_gamma(&rData, &rParams, &tagBytes, r->addr(base), r->fLength);
-                        handle_invalid_gamma(&rType, &rData);
-
-                        SkGammas::Data gData;
-                        SkColorSpaceTransferFn gParams;
-                        SkGammas::Type gType =
-                                parse_gamma(&gData, &gParams, &tagBytes, g->addr(base), g->fLength);
-                        handle_invalid_gamma(&gType, &gData);
-
-                        SkGammas::Data bData;
-                        SkColorSpaceTransferFn bParams;
-                        SkGammas::Type bType =
-                                parse_gamma(&bData, &bParams, &tagBytes, b->addr(base), b->fLength);
-                        handle_invalid_gamma(&bType, &bData);
-
-                        size_t allocSize = sizeof(SkGammas);
-                        if (!safe_add(allocSize, gamma_alloc_size(type, data), &allocSize)) {
-                            return_null("SkGammas struct is too large to allocate");
-                        }
-                        void* memory = sk_malloc_throw(allocSize);
-                        gammas = sk_sp<SkGammas>(new (memory) SkGammas(3));
-                        load_gammas(memory, 0, type, &data, params, r->addr(base));
-
-                        for (int i = 0; i < 3; ++i) {
-                            gammas->fType[i] = type;
-                            gammas->fData[i] = data;
-                        }
-                    }
-                } else {
-                    SkGammas::Data rData;
-                    SkColorSpaceTransferFn rParams;
-                    SkGammas::Type rType =
-                            parse_gamma(&rData, &rParams, &tagBytes, r->addr(base), r->fLength);
-                    handle_invalid_gamma(&rType, &rData);
-
-                    SkGammas::Data gData;
-                    SkColorSpaceTransferFn gParams;
-                    SkGammas::Type gType =
-                            parse_gamma(&gData, &gParams, &tagBytes, g->addr(base), g->fLength);
-                    handle_invalid_gamma(&gType, &gData);
-
-                    SkGammas::Data bData;
-                    SkColorSpaceTransferFn bParams;
-                    SkGammas::Type bType =
-                            parse_gamma(&bData, &bParams, &tagBytes, b->addr(base), b->fLength);
-                    handle_invalid_gamma(&bType, &bData);
-
-                    size_t allocSize = sizeof(SkGammas);
-                    if (!safe_add(allocSize, gamma_alloc_size(rType, rData), &allocSize) ||
-                        !safe_add(allocSize, gamma_alloc_size(gType, gData), &allocSize) ||
-                        !safe_add(allocSize, gamma_alloc_size(bType, bData), &allocSize)) {
-                        return_null("SkGammas struct is too large to allocate");
-                    }
-                    void* memory = sk_malloc_throw(allocSize);
-                    gammas = sk_sp<SkGammas>(new (memory) SkGammas(3));
-
-                    uint32_t offset = 0;
-                    gammas->fType[0] = rType;
-                    offset += load_gammas(memory, offset, rType, &rData, rParams,
-                                          r->addr(base));
-
-                    gammas->fType[1] = gType;
-                    offset += load_gammas(memory, offset, gType, &gData, gParams,
-                                          g->addr(base));
-
-                    gammas->fType[2] = bType;
-                    load_gammas(memory, offset, bType, &bData, bParams, b->addr(base));
-
-                    gammas->fData[0] = rData;
-                    gammas->fData[1] = gData;
-                    gammas->fData[2] = bData;
-                }
-            } else {
-                // Guess sRGB if the profile is missing transfer functions.
-                gammaNamed = kSRGB_SkGammaNamed;
-            }
-
-            if (kNonStandard_SkGammaNamed == gammaNamed) {
-                // It's possible that we'll initially detect non-matching gammas, only for
-                // them to evaluate to the same named gamma curve.
-                gammaNamed = is_named(gammas);
-            }
-
-            if (kNonStandard_SkGammaNamed == gammaNamed) {
-                return sk_sp<SkColorSpace>(new SkColorSpace_XYZ(gammaNamed,
-                                                                std::move(gammas),
-                                                                mat, std::move(data)));
-            }
-
-            return SkColorSpace_Base::MakeRGB(gammaNamed, mat);
+            return make_gray(header, tags.get(), tagCount, base, profileData);
         }
+        case kCMYK_ColorSpace:
+            if (!(kCMYK_ICCTypeFlag & desiredType)) {
+                return_null("Provided input color format (CMYK) does not match profile.");
+            }
+
+            desiredType = kCMYK_ICCTypeFlag;
+            break;
+        default:
+            return_null("ICC profile contains unsupported colorspace");
     }
 
-    return_null("ICC profile contains unsupported colorspace");
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-// We will write a profile with the minimum nine required tags.
-static constexpr uint32_t kICCNumEntries = 9;
-
-static constexpr uint32_t kTAG_desc = SkSetFourByteTag('d', 'e', 's', 'c');
-static constexpr uint32_t kTAG_desc_Bytes = 12;
-static constexpr uint32_t kTAG_desc_Offset = kICCHeaderSize + kICCNumEntries*kICCTagTableEntrySize;
-
-static constexpr uint32_t kTAG_XYZ_Bytes = 20;
-static constexpr uint32_t kTAG_rXYZ_Offset = kTAG_desc_Offset + kTAG_desc_Bytes;
-static constexpr uint32_t kTAG_gXYZ_Offset = kTAG_rXYZ_Offset + kTAG_XYZ_Bytes;
-static constexpr uint32_t kTAG_bXYZ_Offset = kTAG_gXYZ_Offset + kTAG_XYZ_Bytes;
-
-static constexpr uint32_t kTAG_TRC_Bytes = 14;
-static constexpr uint32_t kTAG_rTRC_Offset = kTAG_bXYZ_Offset + kTAG_XYZ_Bytes;
-static constexpr uint32_t kTAG_gTRC_Offset = kTAG_rTRC_Offset + SkAlign4(kTAG_TRC_Bytes);
-static constexpr uint32_t kTAG_bTRC_Offset = kTAG_gTRC_Offset + SkAlign4(kTAG_TRC_Bytes);
-
-static constexpr uint32_t kTAG_wtpt = SkSetFourByteTag('w', 't', 'p', 't');
-static constexpr uint32_t kTAG_wtpt_Offset = kTAG_bTRC_Offset + SkAlign4(kTAG_TRC_Bytes);
-
-static constexpr uint32_t kTAG_cprt = SkSetFourByteTag('c', 'p', 'r', 't');
-static constexpr uint32_t kTAG_cprt_Bytes = 12;
-static constexpr uint32_t kTAG_cprt_Offset = kTAG_wtpt_Offset + kTAG_XYZ_Bytes;
-
-static constexpr uint32_t kICCProfileSize = kTAG_cprt_Offset + kTAG_cprt_Bytes;
-
-static constexpr uint32_t gICCHeader[kICCHeaderSize / 4] {
-    SkEndian_SwapBE32(kICCProfileSize),  // Size of the profile
-    0,                                   // Preferred CMM type (ignored)
-    SkEndian_SwapBE32(0x02100000),       // Version 2.1
-    SkEndian_SwapBE32(kDisplay_Profile), // Display device profile
-    SkEndian_SwapBE32(kRGB_ColorSpace),  // RGB input color space
-    SkEndian_SwapBE32(kXYZ_PCSSpace),    // XYZ profile connection space
-    0, 0, 0,                             // Date and time (ignored)
-    SkEndian_SwapBE32(kACSP_Signature),  // Profile signature
-    0,                                   // Platform target (ignored)
-    0x00000000,                          // Flags: not embedded, can be used independently
-    0,                                   // Device manufacturer (ignored)
-    0,                                   // Device model (ignored)
-    0, 0,                                // Device attributes (ignored)
-    SkEndian_SwapBE32(1),                // Relative colorimetric rendering intent
-    SkEndian_SwapBE32(0x0000f6d6),       // D50 standard illuminant (X)
-    SkEndian_SwapBE32(0x00010000),       // D50 standard illuminant (Y)
-    SkEndian_SwapBE32(0x0000d32d),       // D50 standard illuminant (Z)
-    0,                                   // Profile creator (ignored)
-    0, 0, 0, 0,                          // Profile id checksum (ignored)
-    0, 0, 0, 0, 0, 0, 0,                 // Reserved (ignored)
-    SkEndian_SwapBE32(kICCNumEntries),   // Number of tags
-};
-
-static constexpr uint32_t gICCTagTable[3 * kICCNumEntries] {
-    // Profile description
-    SkEndian_SwapBE32(kTAG_desc),
-    SkEndian_SwapBE32(kTAG_desc_Offset),
-    SkEndian_SwapBE32(kTAG_desc_Bytes),
-
-    // rXYZ
-    SkEndian_SwapBE32(kTAG_rXYZ),
-    SkEndian_SwapBE32(kTAG_rXYZ_Offset),
-    SkEndian_SwapBE32(kTAG_XYZ_Bytes),
-
-    // gXYZ
-    SkEndian_SwapBE32(kTAG_gXYZ),
-    SkEndian_SwapBE32(kTAG_gXYZ_Offset),
-    SkEndian_SwapBE32(kTAG_XYZ_Bytes),
-
-    // bXYZ
-    SkEndian_SwapBE32(kTAG_bXYZ),
-    SkEndian_SwapBE32(kTAG_bXYZ_Offset),
-    SkEndian_SwapBE32(kTAG_XYZ_Bytes),
-
-    // rTRC
-    SkEndian_SwapBE32(kTAG_rTRC),
-    SkEndian_SwapBE32(kTAG_rTRC_Offset),
-    SkEndian_SwapBE32(kTAG_TRC_Bytes),
-
-    // gTRC
-    SkEndian_SwapBE32(kTAG_gTRC),
-    SkEndian_SwapBE32(kTAG_gTRC_Offset),
-    SkEndian_SwapBE32(kTAG_TRC_Bytes),
-
-    // bTRC
-    SkEndian_SwapBE32(kTAG_bTRC),
-    SkEndian_SwapBE32(kTAG_bTRC_Offset),
-    SkEndian_SwapBE32(kTAG_TRC_Bytes),
-
-    // White point
-    SkEndian_SwapBE32(kTAG_wtpt),
-    SkEndian_SwapBE32(kTAG_wtpt_Offset),
-    SkEndian_SwapBE32(kTAG_XYZ_Bytes),
-
-    // Copyright
-    SkEndian_SwapBE32(kTAG_cprt),
-    SkEndian_SwapBE32(kTAG_cprt_Offset),
-    SkEndian_SwapBE32(kTAG_cprt_Bytes),
-};
-
-static constexpr uint32_t kTAG_TextType = SkSetFourByteTag('m', 'l', 'u', 'c');
-static constexpr uint32_t gEmptyTextTag[3] {
-    SkEndian_SwapBE32(kTAG_TextType), // Type signature
-    0,                                // Reserved
-    0,                                // Zero records
-};
-
-static void write_xyz_tag(uint32_t* ptr, const SkMatrix44& toXYZ, int col) {
-    ptr[0] = SkEndian_SwapBE32(kXYZ_PCSSpace);
-    ptr[1] = 0;
-    ptr[2] = SkEndian_SwapBE32(SkFloatToFixed(toXYZ.getFloat(0, col)));
-    ptr[3] = SkEndian_SwapBE32(SkFloatToFixed(toXYZ.getFloat(1, col)));
-    ptr[4] = SkEndian_SwapBE32(SkFloatToFixed(toXYZ.getFloat(2, col)));
-}
-
-static void write_trc_tag(uint32_t* ptr, float value) {
-    ptr[0] = SkEndian_SwapBE32(kTAG_CurveType);
-    ptr[1] = 0;
-
-    // Gamma will be specified with a single value.
-    ptr[2] = SkEndian_SwapBE32(1);
-
-    // Convert gamma to 16-bit fixed point.
-    uint16_t* ptr16 = (uint16_t*) (ptr + 3);
-    ptr16[0] = SkEndian_SwapBE16((uint16_t) (value * 256.0f));
-
-    // Pad tag with zero.
-    ptr16[1] = 0;
-}
-
-sk_sp<SkData> SkColorSpace_Base::writeToICC() const {
-    // Return if this object was created from a profile, or if we have already serialized
-    // the profile.
-    if (fProfileData) {
-        return fProfileData;
-    }
-    // Profile Data is be mandatory for A2B0 Color Spaces
-    SkASSERT(type() == Type::kXYZ);
-
-    // The client may create an SkColorSpace using an SkMatrix44, but currently we only
-    // support writing profiles with 3x3 matrices.
-    // TODO (msarett): Fix this!
-    const SkColorSpace_XYZ* thisXYZ = static_cast<const SkColorSpace_XYZ*>(this);
-    const SkMatrix44& toXYZD50 = *thisXYZ->toXYZD50();
-    if (0.0f != toXYZD50.getFloat(3, 0) || 0.0f != toXYZD50.getFloat(3, 1) ||
-        0.0f != toXYZD50.getFloat(3, 2) || 0.0f != toXYZD50.getFloat(0, 3) ||
-        0.0f != toXYZD50.getFloat(1, 3) || 0.0f != toXYZD50.getFloat(2, 3))
-    {
-        return nullptr;
-    }
-
-    SkAutoMalloc profile(kICCProfileSize);
-    uint8_t* ptr = (uint8_t*) profile.get();
-
-    // Write profile header
-    memcpy(ptr, gICCHeader, sizeof(gICCHeader));
-    ptr += sizeof(gICCHeader);
-
-    // Write tag table
-    memcpy(ptr, gICCTagTable, sizeof(gICCTagTable));
-    ptr += sizeof(gICCTagTable);
-
-    // Write profile description tag
-    memcpy(ptr, gEmptyTextTag, sizeof(gEmptyTextTag));
-    ptr += sizeof(gEmptyTextTag);
-
-    // Write XYZ tags
-    write_xyz_tag((uint32_t*) ptr, toXYZD50, 0);
-    ptr += kTAG_XYZ_Bytes;
-    write_xyz_tag((uint32_t*) ptr, toXYZD50, 1);
-    ptr += kTAG_XYZ_Bytes;
-    write_xyz_tag((uint32_t*) ptr, toXYZD50, 2);
-    ptr += kTAG_XYZ_Bytes;
-
-    // Write TRC tags
-    SkGammaNamed gammaNamed = thisXYZ->gammaNamed();
-    if (kNonStandard_SkGammaNamed == gammaNamed) {
-        // FIXME (msarett):
-        // Write the correct gamma representation rather than 2.2f.
-        write_trc_tag((uint32_t*) ptr, 2.2f);
-        ptr += SkAlign4(kTAG_TRC_Bytes);
-        write_trc_tag((uint32_t*) ptr, 2.2f);
-        ptr += SkAlign4(kTAG_TRC_Bytes);
-        write_trc_tag((uint32_t*) ptr, 2.2f);
-        ptr += SkAlign4(kTAG_TRC_Bytes);
-    } else {
-        switch (gammaNamed) {
-            case kSRGB_SkGammaNamed:
-                // FIXME (msarett):
-                // kSRGB cannot be represented by a value.  Here we fall through to 2.2f,
-                // which is a close guess.  To be more accurate, we need to represent sRGB
-                // gamma with a parametric curve.
-            case k2Dot2Curve_SkGammaNamed:
-                write_trc_tag((uint32_t*) ptr, 2.2f);
-                ptr += SkAlign4(kTAG_TRC_Bytes);
-                write_trc_tag((uint32_t*) ptr, 2.2f);
-                ptr += SkAlign4(kTAG_TRC_Bytes);
-                write_trc_tag((uint32_t*) ptr, 2.2f);
-                ptr += SkAlign4(kTAG_TRC_Bytes);
-                break;
-            case kLinear_SkGammaNamed:
-                write_trc_tag((uint32_t*) ptr, 1.0f);
-                ptr += SkAlign4(kTAG_TRC_Bytes);
-                write_trc_tag((uint32_t*) ptr, 1.0f);
-                ptr += SkAlign4(kTAG_TRC_Bytes);
-                write_trc_tag((uint32_t*) ptr, 1.0f);
-                ptr += SkAlign4(kTAG_TRC_Bytes);
-                break;
-            default:
-                SkASSERT(false);
-                break;
-        }
-    }
-
-    // Write white point tag
-    uint32_t* ptr32 = (uint32_t*) ptr;
-    ptr32[0] = SkEndian_SwapBE32(kXYZ_PCSSpace);
-    ptr32[1] = 0;
-    // TODO (msarett): These values correspond to the D65 white point.  This may not always be
-    //                 correct.
-    ptr32[2] = SkEndian_SwapBE32(0x0000f351);
-    ptr32[3] = SkEndian_SwapBE32(0x00010000);
-    ptr32[4] = SkEndian_SwapBE32(0x000116cc);
-    ptr += kTAG_XYZ_Bytes;
-
-    // Write copyright tag
-    memcpy(ptr, gEmptyTextTag, sizeof(gEmptyTextTag));
-
-    // TODO (msarett): Should we try to hold onto the data so we can return immediately if
-    //                 the client calls again?
-    return SkData::MakeFromMalloc(profile.release(), kICCProfileSize);
+    return make_a2b(desiredType, header, tags.get(), tagCount, base, profileData);
 }

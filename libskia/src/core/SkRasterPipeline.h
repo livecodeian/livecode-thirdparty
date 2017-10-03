@@ -8,10 +8,12 @@
 #ifndef SkRasterPipeline_DEFINED
 #define SkRasterPipeline_DEFINED
 
+#include "SkImageInfo.h"
 #include "SkNx.h"
 #include "SkTArray.h"
 #include "SkTypes.h"
 #include <functional>
+#include <vector>
 
 /**
  * SkRasterPipeline provides a cheap way to chain together a pixel processing pipeline.
@@ -56,17 +58,19 @@
 
 #define SK_RASTER_PIPELINE_STAGES(M)                             \
     M(trace) M(registers)                                        \
-    M(move_src_dst) M(move_dst_src) M(swap_rb) M(swap_rb_d)      \
-    M(clamp_0) M(clamp_a) M(clamp_1)                             \
+    M(move_src_dst) M(move_dst_src) M(swap)                      \
+    M(clamp_0) M(clamp_1) M(clamp_a)                             \
     M(unpremul) M(premul)                                        \
-    M(set_rgb)                                                   \
-    M(from_srgb) M(from_srgb_d) M(to_srgb)                       \
-    M(to_2dot2)                                                  \
+    M(set_rgb) M(swap_rb)                                        \
+    M(from_srgb) M(to_srgb)                                      \
+    M(from_2dot2) M(to_2dot2)                                    \
     M(constant_color) M(store_f32)                               \
-    M(load_565)  M(load_565_d)  M(store_565)                     \
-    M(load_f16)  M(load_f16_d)  M(store_f16)                     \
-    M(load_8888) M(load_8888_d) M(store_8888)                    \
-    M(load_tables) M(store_tables)                               \
+    M(load_a8)   M(store_a8)                                     \
+    M(load_565)  M(store_565)                                    \
+    M(load_f16)  M(store_f16)                                    \
+    M(load_8888) M(store_8888)                                   \
+    M(load_u16_be)                                               \
+    M(load_tables) M(load_tables_u16_be) M(store_tables)         \
     M(scale_u8) M(scale_1_float)                                 \
     M(lerp_u8) M(lerp_565) M(lerp_1_float)                       \
     M(dstatop) M(dstin) M(dstout) M(dstover)                     \
@@ -85,14 +89,13 @@
     M(clamp_y) M(mirror_y) M(repeat_y)                           \
     M(gather_a8) M(gather_g8) M(gather_i8)                       \
     M(gather_565) M(gather_4444) M(gather_8888) M(gather_f16)    \
-    M(top_left) M(top_right) M(bottom_left) M(bottom_right)      \
-    M(accumulate)
+    M(bilinear_nx) M(bilinear_px) M(bilinear_ny) M(bilinear_py)  \
+    M(bicubic_n3x) M(bicubic_n1x) M(bicubic_p1x) M(bicubic_p3x)  \
+    M(bicubic_n3y) M(bicubic_n1y) M(bicubic_p1y) M(bicubic_p3y)  \
+    M(save_xy) M(accumulate)
 
 class SkRasterPipeline {
 public:
-    // No pipeline may be more than kMaxStages long.
-    static const int kMaxStages = 48;
-
     SkRasterPipeline();
 
     enum StockStage {
@@ -119,9 +122,14 @@ public:
         void*        ctx;
     };
 
+    // Conversion from sRGB can be subtly tricky when premultiplication is involved.
+    // Use these helpers to keep things sane.
+    void append_from_srgb(SkAlphaType);
+
 private:
-    int   fNum   = 0;
-    Stage fStages[kMaxStages];
+    std::function<void(size_t, size_t, size_t)> jit() const;
+
+    std::vector<Stage> fStages;
 };
 
 #endif//SkRasterPipeline_DEFINED

@@ -10,6 +10,18 @@
 
 #include "SkImageEncoder.h"
 
+struct SkEncodeOptions {
+    enum class PremulBehavior {
+         // Convert to a linear space before premultiplying or unpremultiplying.
+        kGammaCorrect,
+
+        // Ignore the transfer function when premultiplying or unpremultiplying.
+        kLegacy,
+    };
+
+    PremulBehavior fPremulBehavior = PremulBehavior::kLegacy;
+};
+
 #ifdef SK_HAS_JPEG_LIBRARY
     bool SkEncodeImageAsJPEG(SkWStream*, const SkPixmap&, int quality);
 #else
@@ -17,7 +29,7 @@
 #endif
 
 #ifdef SK_HAS_PNG_LIBRARY
-    bool SkEncodeImageAsPNG(SkWStream*, const SkPixmap&);
+    bool SkEncodeImageAsPNG(SkWStream*, const SkPixmap&, const SkEncodeOptions&);
 #else
     #define SkEncodeImageAsPNG(...) false
 #endif
@@ -26,12 +38,6 @@
     bool SkEncodeImageAsWEBP(SkWStream*, const SkPixmap&, int quality);
 #else
     #define SkEncodeImageAsWEBP(...) false
-#endif
-
-#ifndef SK_BUILD_FOR_ANDROID_FRAMEWORK
-    bool SkEncodeImageAsKTX(SkWStream*, const SkPixmap&);
-#else
-    #define SkEncodeImageAsKTX(...) false
 #endif
 
 #if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)

@@ -857,6 +857,12 @@ SkBlitter* SkBlitter::Choose(const SkPixmap& device,
         p->setColor(0);
     }
 
+    if (kAlpha_8_SkColorType == device.colorType() && drawCoverage) {
+        SkASSERT(nullptr == shader);
+        SkASSERT(paint->isSrcOver());
+        return allocator->createT<SkA8_Coverage_Blitter>(device, *paint);
+    }
+
     if (SkBlitter* blitter = SkCreateRasterPipelineBlitter(device, *paint, matrix, allocator)) {
         return blitter;
     }
@@ -891,7 +897,8 @@ SkBlitter* SkBlitter::Choose(const SkPixmap& device,
     SkShader::Context* shaderContext = nullptr;
     if (shader) {
         const SkShader::ContextRec rec(*paint, matrix, nullptr,
-                                       PreferredShaderDest(device.info()));
+                                       PreferredShaderDest(device.info()),
+                                       device.colorSpace());
         size_t contextSize = shader->contextSize(rec);
         if (contextSize) {
             // Try to create the ShaderContext
@@ -912,11 +919,8 @@ SkBlitter* SkBlitter::Choose(const SkPixmap& device,
     SkBlitter*  blitter = nullptr;
     switch (device.colorType()) {
         case kAlpha_8_SkColorType:
-            if (drawCoverage) {
-                SkASSERT(nullptr == shader);
-                SkASSERT(paint->isSrcOver());
-                blitter = allocator->createT<SkA8_Coverage_Blitter>(device, *paint);
-            } else if (shader) {
+            SkASSERT(!drawCoverage);  // Handled above.
+            if (shader) {
                 blitter = allocator->createT<SkA8_Shader_Blitter>(device, *paint, shaderContext);
             } else {
                 blitter = allocator->createT<SkA8_Blitter>(device, *paint);
@@ -978,7 +982,7 @@ public:
     SkZeroShaderContext(const SkShader& shader, const SkShader::ContextRec& rec)
         // Override rec with the identity matrix, so it is guaranteed to be invertible.
         : INHERITED(shader, SkShader::ContextRec(*rec.fPaint, SkMatrix::I(), nullptr,
-                                                 rec.fPreferredDstType)) {}
+                                                 rec.fPreferredDstType, rec.fDstColorSpace)) {}
 
     void shadeSpan(int x, int y, SkPMColor colors[], int count) override {
         sk_bzero(colors, count * sizeof(SkPMColor));

@@ -407,8 +407,8 @@ static void apply_morphology_rect(GrTextureProvider* provider,
     paint.addColorFragmentProcessor(GrMorphologyEffect::Make(tex, direction, radius, morphType,
                                                              bounds));
     paint.setPorterDuffXPFactory(SkBlendMode::kSrc);
-    renderTargetContext->fillRectToRect(clip, paint, SkMatrix::I(), SkRect::Make(dstRect),
-                                        SkRect::Make(srcRect));
+    renderTargetContext->fillRectToRect(clip, std::move(paint), GrAA::kNo, SkMatrix::I(),
+                                        SkRect::Make(dstRect), SkRect::Make(srcRect));
 }
 
 static void apply_morphology_rect_no_bounds(GrTextureProvider* provider,
@@ -428,8 +428,8 @@ static void apply_morphology_rect_no_bounds(GrTextureProvider* provider,
     }
     paint.addColorFragmentProcessor(GrMorphologyEffect::Make(tex, direction, radius, morphType));
     paint.setPorterDuffXPFactory(SkBlendMode::kSrc);
-    renderTargetContext->fillRectToRect(clip, paint, SkMatrix::I(), SkRect::Make(dstRect),
-                                        SkRect::Make(srcRect));
+    renderTargetContext->fillRectToRect(clip, std::move(paint), GrAA::kNo, SkMatrix::I(),
+                                        SkRect::Make(dstRect), SkRect::Make(srcRect));
 }
 
 static void apply_morphology_pass(GrTextureProvider* provider,
@@ -506,7 +506,7 @@ static sk_sp<SkSpecialImage> apply_morphology(
             return nullptr;
         }
 
-        apply_morphology_pass(context->textureProvider(), 
+        apply_morphology_pass(context->textureProvider(),
                               dstRTContext.get(), clip, srcTexture.get(),
                               srcRect, dstRect, radius.fWidth, morphType,
                               Gr1DKernelEffect::kX_Direction);
@@ -580,6 +580,12 @@ sk_sp<SkSpecialImage> SkMorphologyImageFilter::onFilterImage(SkSpecialImage* sou
 #if SK_SUPPORT_GPU
     if (source->isTextureBacked()) {
         GrContext* context = source->getContext();
+
+        // Ensure the input is in the destination color space. Typically applyCropRect will have
+        // called pad_image to account for our dilation of bounds, so the result will already be
+        // moved to the destination color space. If a filter DAG avoids that, then we use this
+        // fall-back, which saves us from having to do the xform during the filter itself.
+        input = ImageToColorSpace(input.get(), ctx.outputProperties());
 
         auto type = (kDilate_Op == this->op()) ? GrMorphologyEffect::kDilate_MorphologyType
                                                : GrMorphologyEffect::kErode_MorphologyType;

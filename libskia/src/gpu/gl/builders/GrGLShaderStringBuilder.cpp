@@ -6,11 +6,12 @@
  */
 
 #include "GrGLShaderStringBuilder.h"
-#include "gl/GrGLGpu.h"
-#include "gl/GrGLSLPrettyPrint.h"
-#include "SkTraceEvent.h"
+#include "SkAutoMalloc.h"
 #include "SkSLCompiler.h"
 #include "SkSLGLSLCodeGenerator.h"
+#include "SkTraceEvent.h"
+#include "gl/GrGLGpu.h"
+#include "gl/GrGLSLPrettyPrint.h"
 #include "ir/SkSLProgram.h"
 
 #define GL_CALL(X) GR_GL_CALL(gpu->glInterface(), X)
@@ -44,7 +45,9 @@ GrGLuint GrGLCompileAndAttachShader(const GrGLContext& glCtx,
                                     const char** strings,
                                     int* lengths,
                                     int count,
-                                    GrGpu::Stats* stats) {
+                                    GrGpu::Stats* stats,
+                                    const SkSL::Program::Settings& settings,
+                                    SkSL::Program::Inputs* outInputs) {
     const GrGLInterface* gli = glCtx.interface();
 
     GrGLuint shaderId;
@@ -65,21 +68,20 @@ GrGLuint GrGLCompileAndAttachShader(const GrGLContext& glCtx,
     SkString glsl;
     if (type == GR_GL_VERTEX_SHADER || type == GR_GL_FRAGMENT_SHADER) {
         SkSL::Compiler& compiler = *glCtx.compiler();
-        SkDEBUGCODE(bool result = )compiler.toGLSL(type == GR_GL_VERTEX_SHADER 
-                                                                    ? SkSL::Program::kVertex_Kind
+        std::unique_ptr<SkSL::Program> program;
+        program = compiler.convertProgram(
+                                        type == GR_GL_VERTEX_SHADER ? SkSL::Program::kVertex_Kind
                                                                     : SkSL::Program::kFragment_Kind,
-                                                   sksl,
-                                                   *glCtx.caps()->shaderCaps(),
-                                                   &glsl);
-#ifdef SK_DEBUG
-        if (!result) {
+                                        sksl,
+                                        settings);
+        if (!program || !compiler.toGLSL(*program, &glsl)) {
             SkDebugf("SKSL compilation error\n----------------------\n");
             SkDebugf("SKSL:\n");
             dump_string(sksl);
             SkDebugf("\nErrors:\n%s\n", compiler.errorText().c_str());
             SkDEBUGFAIL("SKSL compilation failed!\n");
         }
-#endif
+        *outInputs = program->fInputs;
     } else {
         // TODO: geometry shader support in sksl.
         SkASSERT(type == GR_GL_GEOMETRY_SHADER);

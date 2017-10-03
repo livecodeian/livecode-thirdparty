@@ -9,6 +9,7 @@
 
 #include "limits.h"
 
+#include "SkSLCompiler.h"
 #include "ast/SkSLASTBoolLiteral.h"
 #include "ast/SkSLASTFieldSuffix.h"
 #include "ast/SkSLASTFloatLiteral.h"
@@ -84,7 +85,6 @@ IRGenerator::IRGenerator(const Context* context, std::shared_ptr<SymbolTable> sy
                          ErrorReporter& errorReporter)
 : fContext(*context)
 , fCurrentFunction(nullptr)
-, fCapsMap(nullptr)
 , fSymbolTable(std::move(symbolTable))
 , fLoopLevel(0)
 , fErrors(errorReporter) {}
@@ -97,14 +97,40 @@ void IRGenerator::popSymbolTable() {
     fSymbolTable = fSymbolTable->fParent;
 }
 
-void IRGenerator::start(std::unordered_map<SkString, CapValue>* caps) {
-    this->fCapsMap = caps;
+static void fill_caps(const GrShaderCaps& caps, std::unordered_map<SkString, CapValue>* capsMap) {
+#define CAP(name) capsMap->insert(std::make_pair(SkString(#name), CapValue(caps.name())));
+    CAP(fbFetchSupport);
+    CAP(fbFetchNeedsCustomOutput);
+    CAP(bindlessTextureSupport);
+    CAP(dropsTileOnZeroDivide);
+    CAP(flatInterpolationSupport);
+    CAP(noperspectiveInterpolationSupport);
+    CAP(multisampleInterpolationSupport);
+    CAP(sampleVariablesSupport);
+    CAP(sampleMaskOverrideCoverageSupport);
+    CAP(externalTextureSupport);
+    CAP(texelFetchSupport);
+    CAP(imageLoadStoreSupport);
+    CAP(mustEnableAdvBlendEqs);
+    CAP(mustEnableSpecificAdvBlendEqs);
+    CAP(mustDeclareFragmentShaderOutput);
+    CAP(canUseAnyFunctionInShader);
+#undef CAP
+}
+
+void IRGenerator::start(const Program::Settings* settings) {
+    fSettings = settings;
+    fCapsMap.clear();
+    if (settings->fCaps) {
+        fill_caps(*settings->fCaps, &fCapsMap);
+    }
     this->pushSymbolTable();
+    fInputs.reset();
 }
 
 void IRGenerator::finish() {
     this->popSymbolTable();
-    this->fCapsMap = nullptr;
+    fSettings = nullptr;
 }
 
 std::unique_ptr<Extension> IRGenerator::convertExtension(const ASTExtension& extension) {
@@ -600,6 +626,11 @@ std::unique_ptr<Expression> IRGenerator::convertIdentifier(const ASTIdentifier& 
         case Symbol::kVariable_Kind: {
             const Variable* var = (const Variable*) result;
             this->markReadFrom(*var);
+            if (var->fModifiers.fLayout.fBuiltin == SK_FRAGCOORD_BUILTIN &&
+                fSettings->fFlipY &&
+                (!fSettings->fCaps || !fSettings->fCaps->fragCoordConventionsExtensionString())) {
+                fInputs.fRTHeight = true;
+            }
             return std::unique_ptr<VariableReference>(new VariableReference(identifier.fPosition,
                                                                             *var));
         }
@@ -845,8 +876,18 @@ std::unique_ptr<Expression> IRGenerator::constantFold(const Expression& left,
             case Token::PLUS:       return RESULT(Int,  +);
             case Token::MINUS:      return RESULT(Int,  -);
             case Token::STAR:       return RESULT(Int,  *);
-            case Token::SLASH:      return RESULT(Int,  /);
-            case Token::PERCENT:    return RESULT(Int,  %);
+            case Token::SLASH:
+                if (rightVal) {
+                    return RESULT(Int, /);
+                }
+                fErrors.error(right.fPosition, "division by zero");
+                return nullptr;
+            case Token::PERCENT:
+                if (rightVal) {
+                    return RESULT(Int, %);
+                }
+                fErrors.error(right.fPosition, "division by zero");
+                return nullptr;
             case Token::BITWISEAND: return RESULT(Int,  &);
             case Token::BITWISEOR:  return RESULT(Int,  |);
             case Token::BITWISEXOR: return RESULT(Int,  ^);
@@ -869,7 +910,12 @@ std::unique_ptr<Expression> IRGenerator::constantFold(const Expression& left,
             case Token::PLUS:       return RESULT(Float, +);
             case Token::MINUS:      return RESULT(Float, -);
             case Token::STAR:       return RESULT(Float, *);
-            case Token::SLASH:      return RESULT(Float, /);
+            case Token::SLASH:
+                if (rightVal) {
+                    return RESULT(Float, /);
+                }
+                fErrors.error(right.fPosition, "division by zero");
+                return nullptr;
             case Token::EQEQ:       return RESULT(Bool,  ==);
             case Token::NEQ:        return RESULT(Bool,  !=);
             case Token::GT:         return RESULT(Bool,  >);
@@ -943,15 +989,20 @@ std::unique_ptr<Expression> IRGenerator::convertTernaryExpression(
     const Type* falseType;
     const Type* resultType;
     if (!determine_binary_type(fContext, Token::EQEQ, ifTrue->fType, ifFalse->fType, &trueType,
-                               &falseType, &resultType, true)) {
+                               &falseType, &resultType, true) || trueType != falseType) {
         fErrors.error(expression.fPosition, "ternary operator result mismatch: '" +
                                             ifTrue->fType.fName + "', '" +
                                             ifFalse->fType.fName + "'");
         return nullptr;
     }
-    ASSERT(trueType == falseType);
     ifTrue = this->coerce(std::move(ifTrue), *trueType);
+    if (!ifTrue) {
+        return nullptr;
+    }
     ifFalse = this->coerce(std::move(ifFalse), *falseType);
+    if (!ifFalse) {
+        return nullptr;
+    }
     if (test->fKind == Expression::kBoolLiteral_Kind) {
         // static boolean test, just return one of the branches
         if (((BoolLiteral&) *test).fValue) {
@@ -1336,9 +1387,8 @@ std::unique_ptr<Expression> IRGenerator::convertSwizzle(std::unique_ptr<Expressi
 }
 
 std::unique_ptr<Expression> IRGenerator::getCap(Position position, SkString name) {
-    ASSERT(fCapsMap);
-    auto found = fCapsMap->find(name);
-    if (found == fCapsMap->end()) {
+    auto found = fCapsMap.find(name);
+    if (found == fCapsMap.end()) {
         fErrors.error(position, "unknown capability flag '" + name + "'");
         return nullptr;
     }

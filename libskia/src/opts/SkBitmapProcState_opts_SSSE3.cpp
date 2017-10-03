@@ -12,12 +12,6 @@
 
 #include <tmmintrin.h>  // SSSE3
 
-#ifdef __GNUC__
-#  define ATTRIBUTE_SSSE3 [[gnu::target("ssse3")]]
-#else
-#  define ATTRIBUTE_SSSE3
-#endif
-
 // adding anonymous namespace seemed to force gcc to inline directly the
 // instantiation, instead of creating the functions
 // S32_generic_D32_filter_DX_SSSE3<true> and
@@ -46,7 +40,6 @@ namespace {
 //              (4x(x3), 4x(x2), 4x(x1), 4x(x0)) upon return.
 // @param sixteen_minus_x vector of 8 bit components, containing
 //              (4x(16 - x3), 4x(16 - x2), 4x(16 - x1), 4x(16 - x0))
-ATTRIBUTE_SSSE3
 inline void PrepareConstantsTwoPixelPairs(const uint32_t* xy,
                                           const __m128i& mask_3FFF,
                                           const __m128i& mask_000F,
@@ -93,7 +86,6 @@ inline void PrepareConstantsTwoPixelPairs(const uint32_t* xy,
 //              (4x(y1), 4x(y0), 4x(x1), 4x(x0)) upon return.
 // @param sixteen_minus_x vector of 8 bit components, containing
 //              (4x(16-y1), 4x(16-y0), 4x(16-x1), 4x(16-x0)).
-ATTRIBUTE_SSSE3
 inline void PrepareConstantsTwoPixelPairsDXDY(const uint32_t* xy,
                                               const __m128i& mask_3FFF,
                                               const __m128i& mask_000F,
@@ -136,7 +128,6 @@ inline void PrepareConstantsTwoPixelPairsDXDY(const uint32_t* xy,
 //                or (4x(x3, 16-x3), 4x(x2, 16-x2))
 // @return a vector of 16 bit components containing:
 // (Aa2 * (16 - x1) + Aa3 * x1, ... , Ra0 * (16 - x0) + Ra1 * x0)
-ATTRIBUTE_SSSE3
 inline __m128i ProcessPixelPairHelper(uint32_t pixel0,
                                       uint32_t pixel1,
                                       uint32_t pixel2,
@@ -177,7 +168,6 @@ inline __m128i ProcessPixelPairHelper(uint32_t pixel0,
 // by eight places (dividing by 256), since each multiplication is by a quantity
 // in the range [0:16].
 template<bool has_alpha, int scale>
-ATTRIBUTE_SSSE3
 inline __m128i ScaleFourPixels(__m128i* pixels,
                                const __m128i& alpha) {
     // Divide each 16 bit component by 16 (or 256 depending on scale).
@@ -208,7 +198,6 @@ inline __m128i ScaleFourPixels(__m128i* pixels,
 // In both cases, the results are renormalized (divided by 16) to match the
 // expected formats when storing back the results into memory.
 template<bool has_alpha>
-ATTRIBUTE_SSSE3
 inline __m128i ProcessPixelPairZeroSubY(uint32_t pixel0,
                                         uint32_t pixel1,
                                         uint32_t pixel2,
@@ -226,7 +215,6 @@ inline __m128i ProcessPixelPairZeroSubY(uint32_t pixel0,
 // @return same as ProcessPixelPairZeroSubY, except that only the bottom 4
 // 16 bit components are set.
 template<bool has_alpha>
-ATTRIBUTE_SSSE3
 inline __m128i ProcessOnePixelZeroSubY(uint32_t pixel0,
                                        uint32_t pixel1,
                                        __m128i scale_x,
@@ -252,7 +240,6 @@ inline __m128i ProcessOnePixelZeroSubY(uint32_t pixel0,
 //        contain the 16 - sub_y constant.
 // @return vector of 16 bit components containing:
 // (y * (Aa2 * (16 - x1) + Aa3 * x1), ... , y * (Ra0 * (16 - x0) + Ra1 * x0))
-ATTRIBUTE_SSSE3
 inline __m128i ProcessPixelPair(uint32_t pixel0,
                                 uint32_t pixel1,
                                 uint32_t pixel2,
@@ -292,7 +279,6 @@ inline __m128i ProcessPixelPair(uint32_t pixel0,
 // The values are scaled back to 16 bit components, but with only the bottom
 // 8 bits being set.
 template<bool has_alpha>
-ATTRIBUTE_SSSE3
 inline __m128i ProcessTwoPixelPairs(const uint32_t* row0,
                                     const uint32_t* row1,
                                     const int* x0,
@@ -322,7 +308,6 @@ inline __m128i ProcessTwoPixelPairs(const uint32_t* row0,
 
 // Similar to ProcessTwoPixelPairs except the pixel indexes.
 template<bool has_alpha>
-ATTRIBUTE_SSSE3
 inline __m128i ProcessTwoPixelPairsDXDY(const uint32_t* row00,
                                         const uint32_t* row01,
                                         const uint32_t* row10,
@@ -357,7 +342,6 @@ inline __m128i ProcessTwoPixelPairsDXDY(const uint32_t* row00,
 
 // Same as ProcessPixelPair, except that performing the math one output pixel
 // at a time. This means that only the bottom four 16 bit components are set.
-ATTRIBUTE_SSSE3
 inline __m128i ProcessOnePixel(uint32_t pixel0, uint32_t pixel1,
                                const __m128i& scale_x, const __m128i& y) {
     __m128i a0 = _mm_cvtsi32_si128(pixel0);
@@ -400,7 +384,6 @@ inline __m128i ProcessOnePixel(uint32_t pixel0, uint32_t pixel1,
 // As a result, this method behaves faster than the traditional SSE2. The actual
 // boost varies greatly on the underlying architecture.
 template<bool has_alpha>
-ATTRIBUTE_SSSE3
 void S32_generic_D32_filter_DX_SSSE3(const SkBitmapProcState& s,
                                      const uint32_t* xy,
                                      int count, uint32_t* colors) {
@@ -593,7 +576,6 @@ void S32_generic_D32_filter_DX_SSSE3(const SkBitmapProcState& s,
  * special case suby == 0 as suby is changing in every loop.
  */
 template<bool has_alpha>
-ATTRIBUTE_SSSE3
 void S32_generic_D32_filter_DXDY_SSSE3(const SkBitmapProcState& s,
                                        const uint32_t* xy,
                                        int count, uint32_t* colors) {
