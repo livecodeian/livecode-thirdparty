@@ -641,7 +641,7 @@
 				'../libexpat/libexpat.gyp:libexpat',
 				'../libjpeg/libjpeg.gyp:libjpeg',
 				'../libpng/libpng.gyp:libpng',
-				'../libz/libz.gyp:libz',
+				'../../prebuilt/libz.gyp:libz',
 
 				'libskia_opt_none',
 				'libskia_opt_arm',

@@ -11,7 +11,7 @@
 			
 			'dependencies':
 			[
-				'../libz/libz.gyp:libz',
+				'../../prebuilt/libz.gyp:libz',
 			],
 			
 			'conditions':

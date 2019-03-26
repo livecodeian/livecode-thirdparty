@@ -7,6 +7,41 @@
 	'targets':
 	[
 		{
+			'target_name': 'libcef',
+			'type': 'none',
+			'dependencies':
+			[
+				'libcef_library_wrapper',
+				libcef_stubs
+			],
+			
+			# OSX, Windows and Linux only
+			'target_conditions':
+			[
+				[
+					'not toolset_os in ("mac", "win", "linux")',
+					{
+						'type': 'none',
+					},
+				],
+				[
+					'toolset_os == "linux" and not toolset_arch in ("x86", "x86_64")',
+					{
+						'type': 'none',
+					},
+				],
+				[
+					'toolset_os == "win"',
+					{
+						'defines':
+						[
+							'NOMINMAX',
+						],
+					},
+				],
+			],
+		},
+		{
 			'target_name': 'libcef_library_wrapper',
 			'type': 'static_library',
 
